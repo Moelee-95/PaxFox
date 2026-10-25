@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/data/ledger_store.dart';
 import '../core/domain/ledger.dart';
 import '../core/domain/recurring.dart';
+import '../core/presentation/confirmation_dialog.dart';
 
 class RecurringScreen extends StatefulWidget {
   const RecurringScreen({super.key, required this.store});
@@ -45,24 +46,10 @@ class _RecurringScreenState extends State<RecurringScreen> {
     ),
   );
   Future<void> remove(RecurringRule rule) async {
-    final yes = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete recurring rule?'),
-        content: const Text(
-          'Future payments stop. Posted payments and unpaid occurrences remain for review.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final yes = await confirmAction(
+      context,
+      title: 'Delete recurring rule?',
+      message: 'Future payments stop. Posted payments and unpaid occurrences remain for review.',
     );
     if (yes == true) {
       await action(() => widget.store.archiveRecurring(rule.id!));

@@ -38,21 +38,54 @@ Android/iOS use the native sqflite plugin. Windows/Linux use SQLite FFI. Web is 
 ```text
 lib/
   core/
-    domain/ledger.dart      # money, entities, refund/transfer totals, balances
-    domain/freedom.dart     # fixed-precision financial scenario calculations
-    domain/recurring.dart   # monthly schedules, rules and occurrences
-    data/ledger_store.dart # SQLite lifecycle, migrations and validated writes
+    domain/
+      ledger.dart             # money, accounts, transactions, balance rules
+      ledger_queries.dart     # indexed search, monthly summaries, batch balances
+      freedom.dart            # financial scenario calculations
+      recurring.dart          # monthly schedules and occurrences
+    data/
+      ledger_database.dart    # SQLite opening, schema, migrations and seed data
+      ledger_store.dart       # validated writes, snapshots and change notifications
+      transaction_csv.dart    # CSV parsing and serialization
+    presentation/             # shared rows, cards, dialogs and action bars
   screens/
-    main_screen.dart       # dashboard, ledger search/filters, basic reports
-    transaction_form.dart  # validated add/edit/delete
-    accounts_screen.dart   # cash/bank accounts, starting balances
-    setup_screen.dart      # required cash/bank onboarding and review
-    recurring_screen.dart  # monthly rules, schedules and unpaid bills
-    freedom_screen.dart    # cashflow/FI results and assumptions editor
-  main.dart                # storage initialization, theme and failure/retry UI
+    main_screen.dart          # navigation, lifecycle and selection orchestration
+    home_screen.dart          # month selection and expense/income browsing
+    overview_screen.dart      # monthly metrics and account balances
+    reports_screen.dart       # category spending reports
+    transactions_screen.dart  # search, type filter and transaction list
+    transaction_bulk_editor.dart # bulk-edit choices and commit coordination
+    transaction_form.dart     # add/edit/delete form
+    accounts_screen.dart      # account management and balance corrections
+    setup_screen.dart         # initial account setup
+    recurring_screen.dart     # recurring rules and unpaid bills
+    freedom_screen.dart       # projections and plan assumptions
+  features/receipts/           # invoice extraction, review and images
+  main.dart                   # startup, theme and storage failure/retry UI
 ```
 
 `LedgerStore` is injected into the UI and notifies listeners after committed writes. Domain calculations have no Flutter UI or storage dependencies. SQLite writes involving validation of related accounts execute inside a transaction. Foreign keys and database constraints protect the ledger. Indexes cover transaction date, category, source and destination accounts. Version 1 contains `accounts` and `transactions`, including created/updated timestamps. Version 10 adds scanned invoice batches and transaction links for item-level expenses/refunds, preserving old receipts. Version 9 adds receipts and related item rows with cascading transaction deletion. Version 8 stores expense/income type on recurring rules and occurrences, defaulting existing schedules to expense. Income can be received into blocked accounts; outgoing expense restrictions remain unchanged. Version 7 adds stable category icon identifiers and seeds icon metadata without changing ledger labels or amounts. Version 6 adds `recurring_rules`, `recurring_occurrences`, a due-date index and unique rule/date constraints. Blocked accounts use the existing availability flag (false means blocked). Version 5 adds per-bank overdraft permissions. New banks default to no overdraft; migrated banks retain their previously allowed overdraft behavior until edited. Cash always disallows overdraft. Version 4 adds cash/bank account types and explicit same-day starting-balance behavior. Existing accounts remain bank accounts with unchanged end-of-day snapshot semantics. A persisted setup-completed setting controls first-launch onboarding. Version 3 adds `categories` with separate expense/income lists, retains existing transaction category labels, and seeds starter options. Version 2 adds `settings` for the typed financial plan serialized as JSON. `onUpgrade` preserves version-1 ledger data. Future schema changes must increment the version and migrate existing data; do not reset databases.
+
+
+### Making changes
+
+| Change | Start here |
+| --- | --- |
+| Transaction row appearance | `core/presentation/transaction_tile.dart` |
+| Summary cards and responsive layout | `metric_card.dart`, `responsive_pair.dart`, `account_balance_card.dart` in `core/presentation/` |
+| Pinned save/import buttons | `core/presentation/bottom_action_bar.dart` |
+| Confirmation wording/layout | `core/presentation/confirmation_dialog.dart` and its callers |
+| Drawer destinations | `core/presentation/main_drawer.dart`, then routing in `screens/main_screen.dart` |
+| Home, Overview, Reports or transaction filters | The corresponding screen widget |
+| Monthly totals, search or displayed account balances | `core/domain/ledger_queries.dart` |
+| Write validation or account protections | `core/data/ledger_store.dart` |
+| Database schema or upgrades | `core/data/ledger_database.dart` |
+
+Screens use the injected store; writes go through its methods. Exposed ledger, account, category and recurring collections are read-only. `refresh()` reads one SQLite transaction and publishes the completed snapshot once, so a failed read leaves the previous state available. It also rebuilds category lookups and invalidates derived data after writes.
+
+`LedgerIndex` groups entries by year/month, computes each visited month's summary once, and normalizes searchable text once per snapshot. Home, Overview, Reports and selection share those results. The most recent search result is reused until the query, type or snapshot changes. Account balances are calculated in one ledger pass and cached until the snapshot or local calendar date changes. Cashflow projections are reused while the plan and salary-loss scenario stay the same. The main pager builds pages on demand.
+
+Run the calculation benchmark with `dart run tool/benchmark_ledger.dart`. It checks agreement between individual and batch balances, then reports median timings for 100 accounts and 100,000 synthetic transactions. Cached monthly lookup timings exclude index construction and the first summary calculation. These are calculation measurements, not end-to-end device frame or startup measurements.
 
 ## Local data and privacy
 

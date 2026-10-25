@@ -1,14 +1,16 @@
-import 'package:flutter/material.dart';
-
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/material.dart';
+
 import '../core/data/ledger_store.dart';
-import '../core/domain/ledger.dart';
 import '../core/domain/category.dart';
+import '../core/domain/ledger.dart';
+import '../core/presentation/bottom_action_bar.dart';
 import '../core/presentation/category_icons.dart';
-import '../features/receipts/invoice_scan_screen.dart';
+import '../core/presentation/confirmation_dialog.dart';
 import '../features/receipts/invoice_images.dart';
+import '../features/receipts/invoice_scan_screen.dart';
 
 class TransactionForm extends StatefulWidget {
   const TransactionForm({super.key, required this.store, this.entry});
@@ -109,22 +111,10 @@ class _TransactionFormState extends State<TransactionForm> {
   }
 
   Future<void> delete() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete transaction?'),
-        content: const Text('This will update reports and account balances.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final confirmed = await confirmAction(
+      context,
+      title: 'Delete transaction?',
+      message: 'This will update reports and account balances.',
     );
     if (confirmed != true || !mounted) {
       return;
@@ -216,13 +206,11 @@ class _TransactionFormState extends State<TransactionForm> {
   );
   @override
   Widget build(BuildContext context) => Scaffold(
-    bottomNavigationBar: SafeArea(
-      top: false,
-      minimum: const EdgeInsets.all(16),
-      child: FilledButton(
-        onPressed: saving ? null : save,
-        child: Text(saving ? 'Saving…' : 'Save transaction'),
-      ),
+    bottomNavigationBar: BottomActionBar(
+      label: 'Save transaction',
+      busy: saving,
+      busyLabel: 'Saving…',
+      onPressed: save,
     ),
     appBar: AppBar(
       title: Text(
@@ -458,7 +446,7 @@ class _TransactionFormState extends State<TransactionForm> {
                 if (paymentMethod != null) accountField(false),
                 if (accountId != null)
                   Text(
-                    'Available balance: €${Currency.eur.format(accountBalance(widget.store.accounts.singleWhere((a) => a.id == accountId), widget.store.entries, DateTime.now()))}. ${widget.store.accounts.singleWhere((a) => a.id == accountId).canOverdraw ? 'Overdraft allowed.' : 'Insufficient funds will be rejected.'}',
+                    'Available balance: €${Currency.eur.format(widget.store.currentBalances.byAccount[accountId] ?? 0)}. ${widget.store.accounts.singleWhere((a) => a.id == accountId).canOverdraw ? 'Overdraft allowed.' : 'Insufficient funds will be rejected.'}',
                   ),
               ] else
                 accountField(false),

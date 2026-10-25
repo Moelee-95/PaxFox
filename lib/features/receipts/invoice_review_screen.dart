@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/data/ledger_store.dart';
 import '../../core/domain/ledger.dart';
+import '../../core/presentation/bottom_action_bar.dart';
+import '../../core/presentation/confirmation_dialog.dart';
 import 'invoice.dart';
 import 'invoice_images.dart';
 
@@ -183,19 +185,12 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
     return PopScope(
       canPop: !busy,
       child: Scaffold(
-        bottomNavigationBar: SafeArea(
-          top: false,
-          minimum: const EdgeInsets.all(16),
-          child: FilledButton(
-            onPressed: busy ? null : save,
-            child: Text(
-              busy
-                  ? 'Saving...'
-                  : widget.entry == null
-                  ? 'Save transactions'
-                  : 'Save invoice expense',
-            ),
-          ),
+        bottomNavigationBar: BottomActionBar(
+          label: widget.entry == null
+              ? 'Save transactions'
+              : 'Save invoice expense',
+          busy: busy,
+          onPressed: save,
         ),
         appBar: AppBar(
           title: const Text('Review invoice'),
@@ -206,24 +201,10 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
                 onPressed: busy
                     ? null
                     : () async {
-                        final yes = await showDialog<bool>(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            title: const Text('Delete invoice?'),
-                            content: const Text(
-                              'The expense, attached item details and stored photos will be removed.',
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context, false),
-                                child: const Text('Cancel'),
-                              ),
-                              FilledButton(
-                                onPressed: () => Navigator.pop(context, true),
-                                child: const Text('Delete'),
-                              ),
-                            ],
-                          ),
+                        final yes = await confirmAction(
+                          context,
+                          title: 'Delete invoice?',
+                          message: 'The expense, attached item details and stored photos will be removed.',
                         );
                         if (yes != true || !mounted) {
                           return;

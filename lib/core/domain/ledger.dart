@@ -11,9 +11,10 @@ enum Currency {
   String display(int minor) => '$symbol${format(minor)}';
   final int exponent;
   int get scale => exponent == 2 ? 100 : 1000;
+  static final _amountPattern = RegExp(r'^(\d+)(?:[.,](\d+))?$');
 
   int parse(String input) {
-    final match = RegExp(r'^(\d+)(?:[.,](\d+))?$').firstMatch(input.trim());
+    final match = _amountPattern.firstMatch(input.trim());
     if (match == null || (match[2]?.length ?? 0) > exponent) {
       throw FormatException(
         'Use a positive amount with up to $exponent decimals.',
@@ -58,6 +59,11 @@ class LedgerEntry {
   final DateTime date;
   final String description, category, notes;
   final int? accountId, destinationId;
+
+  int get accountChange => switch (type) {
+    EntryType.income || EntryType.refund => amount,
+    EntryType.expense || EntryType.transfer => -amount,
+  };
 
   Map<String, Object?> toMap() => {
     'type': type.name,
@@ -155,21 +161,20 @@ int accountBalance(
   DateTime through,
 ) {
   var balance = account.opening;
+  final start = dateOnly(account.asOf);
+  final end = dateOnly(through);
   for (final entry in entries) {
     if ((account.includeOnAsOf
-            ? entry.date.isBefore(dateOnly(account.asOf))
-            : !entry.date.isAfter(dateOnly(account.asOf))) ||
-        entry.date.isAfter(dateOnly(through))) {
+            ? entry.date.isBefore(start)
+            : !entry.date.isAfter(start)) ||
+        entry.date.isAfter(end)) {
       continue;
     }
     if (entry.currency != account.currency) {
       continue;
     }
     if (entry.accountId == account.id) {
-      balance += switch (entry.type) {
-        EntryType.income || EntryType.refund => entry.amount,
-        EntryType.expense || EntryType.transfer => -entry.amount,
-      };
+      balance += entry.accountChange;
     }
     if (entry.type == EntryType.transfer && entry.destinationId == account.id) {
       balance += entry.amount;

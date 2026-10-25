@@ -1,0 +1,231 @@
+import 'dart:io';
+
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:sqflite/sqflite.dart' show databaseFactorySqflitePlugin;
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+import '../domain/category.dart';
+
+class LedgerDatabase {
+  static Future<Database> open({String? path, DatabaseFactory? factory}) async {
+    if (factory == null && (Platform.isWindows || Platform.isLinux)) {
+      sqfliteFfiInit();
+      factory = databaseFactoryFfi;
+    }
+    final location =
+        path ??
+        p.join((await getApplicationSupportDirectory()).path, 'moneva.sqlite');
+    final db = await (factory ?? databaseFactorySqflitePlugin).openDatabase(
+      location,
+      options: OpenDatabaseOptions(
+        version: 10,
+        onUpgrade: (db, oldVersion, newVersion) async {
+          if (oldVersion < 2) {
+            await db.execute(
+              'CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
+            );
+          }
+          if (oldVersion < 3) {
+            await _createCategories(db);
+          }
+          if (oldVersion < 4) {
+            await _upgradeAccounts(db);
+          }
+          if (oldVersion < 5) {
+            await _addOverdraftPolicy(db);
+          }
+          if (oldVersion < 6) {
+            await _createRecurring(db);
+          }
+          if (oldVersion < 7) {
+            await _addCategoryIcons(db);
+          }
+          if (oldVersion < 8) {
+            await _addRecurringTypes(db);
+          }
+          if (oldVersion < 9) {
+            await _createReceipts(db);
+          }
+          if (oldVersion < 10) {
+            await _createInvoiceBatches(db);
+          }
+        },
+        onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
+        onCreate: (db, version) async {
+          await db.execute(
+            'CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
+          );
+          await db.execute(
+            "CREATE TABLE accounts (id INTEGER PRIMARY KEY, name TEXT NOT NULL, currency TEXT NOT NULL CHECK(currency IN ('eur','iqd')), opening INTEGER NOT NULL, as_of TEXT NOT NULL, available INTEGER NOT NULL CHECK(available IN (0,1)))",
+          );
+          await db.execute(
+            "CREATE TABLE transactions (id INTEGER PRIMARY KEY, type TEXT NOT NULL CHECK(type IN ('expense','income','refund','transfer')), amount INTEGER NOT NULL CHECK(amount > 0 AND amount <= 9000000000000000), currency TEXT NOT NULL CHECK(currency IN ('eur','iqd')), date TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, account_id INTEGER REFERENCES accounts(id), destination_id INTEGER REFERENCES accounts(id), notes TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, CHECK(type != 'transfer' OR (account_id IS NOT NULL AND destination_id IS NOT NULL AND account_id != destination_id)))",
+          );
+          for (final column in [
+            'date',
+            'category',
+            'account_id',
+            'destination_id',
+          ]) {
+            await db.execute(
+              'CREATE INDEX transactions_$column ON transactions($column)',
+            );
+          }
+          await _createCategories(db);
+          await _upgradeAccounts(db);
+          await _addOverdraftPolicy(db);
+          await _createRecurring(db);
+          await _addCategoryIcons(db);
+          await _addRecurringTypes(db);
+          await _createReceipts(db);
+          await _createInvoiceBatches(db);
+        },
+      ),
+    );
+    return db;
+  }
+
+  static Future<void> _addOverdraftPolicy(DatabaseExecutor db) async {
+    await db.execute(
+      'ALTER TABLE accounts ADD COLUMN allow_overdraft INTEGER NOT NULL DEFAULT 0 CHECK(allow_overdraft IN (0,1))',
+    );
+    // Existing bank accounts previously allowed overdrafts; preserve their policy.
+    await db.execute(
+      "UPDATE accounts SET allow_overdraft = 1 WHERE kind = 'bank'",
+    );
+  }
+
+  static Future<void> _upgradeAccounts(DatabaseExecutor db) async {
+    await db.execute(
+      "ALTER TABLE accounts ADD COLUMN kind TEXT NOT NULL DEFAULT 'bank' CHECK(kind IN ('cash','bank'))",
+    );
+    await db.execute(
+      'ALTER TABLE accounts ADD COLUMN include_on_as_of INTEGER NOT NULL DEFAULT 0 CHECK(include_on_as_of IN (0,1))',
+    );
+  }
+
+  static Future<void> _createCategories(DatabaseExecutor db) async {
+    await db.execute(
+      "CREATE TABLE categories (id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('expense','income')), name TEXT NOT NULL CHECK(length(trim(name)) > 0), UNIQUE(kind, name COLLATE NOCASE))",
+    );
+    // Preserve every existing label exactly, before adding suggestions.
+    final existing = await db.rawQuery(
+      "SELECT DISTINCT category AS name, CASE WHEN type = 'income' THEN 'income' ELSE 'expense' END AS kind FROM transactions WHERE type != 'transfer'",
+    );
+    for (final row in existing) {
+      await db.insert(
+        'categories',
+        row,
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
+    for (final kind in CategoryKind.values) {
+      final names = kind == CategoryKind.expense
+          ? [
+              'Other',
+              'Groceries',
+              'Dining out',
+              'Transport',
+              'Rent & utilities',
+              'Health',
+              'Shopping',
+              'Entertainment',
+              'Education',
+              'Insurance',
+              'Subscriptions',
+              'Travel',
+            ]
+          : [
+              'Other',
+              'Salary',
+              'Freelance',
+              'Rental income',
+              'Investment income',
+              'Gifts',
+            ];
+      for (final name in names) {
+        await db.insert('categories', {
+          'kind': kind.name,
+          'name': name,
+        }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      }
+    }
+  }
+
+  static Future<void> _addCategoryIcons(DatabaseExecutor db) async {
+    await db.execute(
+      "ALTER TABLE categories ADD COLUMN icon TEXT NOT NULL DEFAULT 'general'",
+    );
+    const defaults = <String, CategoryIcon>{
+      'Groceries': CategoryIcon.groceries,
+      'Dining out': CategoryIcon.dining,
+      'Transport': CategoryIcon.transport,
+      'Rent & utilities': CategoryIcon.home,
+      'Health': CategoryIcon.health,
+      'Shopping': CategoryIcon.shopping,
+      'Entertainment': CategoryIcon.entertainment,
+      'Education': CategoryIcon.education,
+      'Insurance': CategoryIcon.insurance,
+      'Subscriptions': CategoryIcon.subscriptions,
+      'Travel': CategoryIcon.travel,
+      'Salary': CategoryIcon.salary,
+      'Freelance': CategoryIcon.freelance,
+      'Rental income': CategoryIcon.home,
+      'Investment income': CategoryIcon.investments,
+      'Gifts': CategoryIcon.gifts,
+    };
+    for (final entry in defaults.entries) {
+      await db.update(
+        'categories',
+        {'icon': entry.value.name},
+        where: 'name = ?',
+        whereArgs: [entry.key],
+      );
+    }
+  }
+
+  static Future<void> _addRecurringTypes(DatabaseExecutor db) async {
+    for (final table in ['recurring_rules', 'recurring_occurrences']) {
+      await db.execute(
+        "ALTER TABLE $table ADD COLUMN type TEXT NOT NULL DEFAULT 'expense' CHECK(type IN ('expense','income'))",
+      );
+    }
+  }
+
+  static Future<void> _createRecurring(DatabaseExecutor db) async {
+    await db.execute(
+      'CREATE TABLE recurring_rules (id INTEGER PRIMARY KEY, description TEXT NOT NULL, amount INTEGER NOT NULL CHECK(amount > 0), category TEXT NOT NULL, account_id INTEGER NOT NULL REFERENCES accounts(id), day INTEGER NOT NULL CHECK(day BETWEEN 1 AND 31), interval INTEGER NOT NULL CHECK(interval BETWEEN 1 AND 120), next_date TEXT NOT NULL, end_date TEXT, active INTEGER NOT NULL, archived INTEGER NOT NULL DEFAULT 0)',
+    );
+    await db.execute(
+      "CREATE TABLE recurring_occurrences (id INTEGER PRIMARY KEY, rule_id INTEGER NOT NULL REFERENCES recurring_rules(id), scheduled_date TEXT NOT NULL, description TEXT NOT NULL, amount INTEGER NOT NULL, category TEXT NOT NULL, account_id INTEGER NOT NULL REFERENCES accounts(id), status TEXT NOT NULL CHECK(status IN ('posted','failed','skipped')), error TEXT, transaction_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL, UNIQUE(rule_id, scheduled_date))",
+    );
+    await db.execute(
+      'CREATE INDEX recurring_due ON recurring_rules(active, archived, next_date)',
+    );
+  }
+
+  static Future<void> _createReceipts(DatabaseExecutor db) async {
+    await db.execute(
+      'CREATE TABLE receipts (id INTEGER PRIMARY KEY, transaction_id INTEGER NOT NULL UNIQUE REFERENCES transactions(id) ON DELETE CASCADE, total INTEGER NOT NULL, draft TEXT NOT NULL, image_paths TEXT NOT NULL, raw_response TEXT NOT NULL, scanned_at TEXT NOT NULL)',
+    );
+    await db.execute(
+      'CREATE TABLE receipt_items (id INTEGER PRIMARY KEY, transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE, description TEXT NOT NULL, quantity TEXT NOT NULL, unit_price INTEGER, total INTEGER NOT NULL, category TEXT NOT NULL, edited INTEGER NOT NULL, position INTEGER NOT NULL)',
+    );
+    await db.execute(
+      'CREATE INDEX receipt_items_transaction ON receipt_items(transaction_id)',
+    );
+  }
+
+  static Future<void> _createInvoiceBatches(DatabaseExecutor db) async {
+    await db.execute(
+      'CREATE TABLE scanned_invoices (id INTEGER PRIMARY KEY, draft TEXT NOT NULL, image_paths TEXT NOT NULL, raw_response TEXT NOT NULL, created_at TEXT NOT NULL)',
+    );
+    await db.execute(
+      'CREATE TABLE scanned_invoice_entries (transaction_id INTEGER PRIMARY KEY REFERENCES transactions(id) ON DELETE CASCADE, batch_id INTEGER NOT NULL REFERENCES scanned_invoices(id) ON DELETE CASCADE)',
+    );
+    await db.execute(
+      'CREATE INDEX scanned_invoice_batch ON scanned_invoice_entries(batch_id)',
+    );
+  }
+}

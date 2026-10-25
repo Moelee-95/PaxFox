@@ -180,6 +180,95 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('transaction filters survive switching between lazy pages', (
+    tester,
+  ) async {
+    await tester.runAsync(() async {
+      await prepareAccounts();
+      for (final item in [
+        (description: 'Bread', type: EntryType.expense),
+        (description: 'Bread return', type: EntryType.refund),
+        (description: 'Milk', type: EntryType.expense),
+      ]) {
+        await store.saveEntry(
+          LedgerEntry(
+            type: item.type,
+            amount: 100,
+            currency: Currency.eur,
+            date: dateOnly(DateTime.now()),
+            description: item.description,
+            category: 'Groceries',
+            accountId: store.accounts.first.id,
+          ),
+        );
+      }
+    });
+    await tester.pumpWidget(MyApp(store: store));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Transactions'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'bread');
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<EntryType>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('expense').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Bread'), findsOneWidget);
+    expect(find.text('Bread return'), findsNothing);
+    expect(find.text('Milk'), findsNothing);
+
+    await tester.tap(find.text('Home'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Transactions'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller!.text,
+      'bread',
+    );
+    expect(find.text('Bread'), findsOneWidget);
+    expect(find.text('Bread return'), findsNothing);
+    expect(find.text('Milk'), findsNothing);
+
+    await tester.longPress(find.text('Bread'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Select all visible'));
+    await tester.pumpAndSettle();
+    expect(find.text('1 selected'), findsOneWidget);
+    await tester.tap(find.text('Overview'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Cancel selection'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'reports restore the previous page and drawer Home resets the pager',
+    (tester) async {
+      await tester.runAsync(prepareAccounts);
+      await tester.pumpWidget(MyApp(store: store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Transactions'));
+      await tester.pumpAndSettle();
+      await openMenuItem(tester, 'Reports');
+      expect(find.text('Spending by category'), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsOneWidget);
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        3,
+      );
+
+      await openMenuItem(tester, 'Reports');
+      await openMenuItem(tester, 'Home');
+      expect(find.byKey(const ValueKey('month-selector')), findsOneWidget);
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        0,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets(
     'recurring income form selects income categories and a blocked receiving account',
     (tester) async {

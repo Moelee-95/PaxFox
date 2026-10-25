@@ -49,7 +49,7 @@ class AccountsScreen extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      '€${a.currency.format(accountBalance(a, store.entries, DateTime.now()))}',
+                      '€${a.currency.format(store.currentBalances.byAccount[a.id] ?? a.opening)}',
                     ),
                     const SizedBox(width: 8),
                     const Icon(Icons.edit_outlined),
@@ -89,7 +89,7 @@ class _AccountFormState extends State<AccountForm> {
       text: a == null
           ? '0'
           : Currency.eur.format(
-              accountBalance(a, widget.store.entries, DateTime.now()),
+              widget.store.currentBalances.byAccount[a.id] ?? a.opening,
             ),
     );
     kind = a?.kind ?? AccountKind.bank;
@@ -128,7 +128,7 @@ class _AccountFormState extends State<AccountForm> {
           ? desired
           : old.opening +
                 desired -
-                accountBalance(old, widget.store.entries, DateTime.now());
+                (widget.store.currentBalances.byAccount[old.id] ?? old.opening);
       final account = Account(
         id: old?.id,
         name: name.text.trim(),

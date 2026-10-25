@@ -1,29 +1,55 @@
-import 'dart:io';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
-import 'package:sqflite/sqflite.dart' show databaseFactorySqflitePlugin;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-import '../domain/ledger.dart';
-import '../domain/freedom.dart';
-import '../domain/category.dart';
-import '../domain/recurring.dart';
-import 'transaction_csv.dart';
 import '../../features/receipts/invoice.dart';
 import '../../features/receipts/invoice_images.dart';
+import '../domain/category.dart';
+import '../domain/freedom.dart';
+import '../domain/ledger.dart';
+import '../domain/ledger_queries.dart';
+import '../domain/recurring.dart';
+import 'ledger_database.dart';
+import 'transaction_csv.dart';
 
 class LedgerStore extends ChangeNotifier {
   LedgerStore(this.db);
   final Database db;
-  List<LedgerEntry> entries = [];
-  List<Account> accounts = [];
-  Set<int> receiptTransactionIds = {};
-  List<LedgerCategory> categories = [];
+  LedgerIndex _ledger = LedgerIndex(const []);
+  List<LedgerEntry> get entries => _ledger.entries;
+  List<Account> _accounts = const [];
+  List<Account> get accounts => _accounts;
+  Set<int> _receiptTransactionIds = const {};
+  Set<int> get receiptTransactionIds => _receiptTransactionIds;
+  List<LedgerCategory> _categories = const [];
+  List<LedgerCategory> get categories => _categories;
+  Map<CategoryKind, List<LedgerCategory>> _categoriesByKind = const {};
+  Map<(CategoryKind, String), LedgerCategory> _categoriesByName = const {};
+
   List<LedgerCategory> categoriesFor(EntryType type) =>
-      categories.where((c) => c.kind == categoryKind(type)).toList();
+      _categoriesByKind[categoryKind(type)] ?? const [];
+
+  CategoryIcon iconFor(LedgerEntry entry) =>
+      _categoriesByName[(categoryKind(entry.type), entry.category)]?.icon ??
+      CategoryIcon.general;
+
+  MonthlyLedger monthSummary(DateTime month) => _ledger.forMonth(month);
+
+  List<LedgerEntry> searchEntries({String query = '', EntryType? type}) =>
+      _ledger.search(query: query, type: type);
+
+  AccountBalances? _balances;
+  DateTime? _balanceDate;
+  AccountBalances get currentBalances {
+    final today = dateOnly(DateTime.now());
+    if (_balances == null || _balanceDate != today) {
+      _balances = AccountBalances(accounts, entries, today);
+      _balanceDate = today;
+    }
+    return _balances!;
+  }
+
   FreedomPlan? plan;
   bool hasLegacyCurrencyData = false;
   bool setupCompleted = false;
@@ -40,171 +66,121 @@ class LedgerStore extends ChangeNotifier {
     await refresh();
   }
 
-  List<RecurringRule> recurringRules = [];
-  List<RecurringOccurrence> recurringOccurrences = [];
+  List<RecurringRule> _recurringRules = const [];
+  List<RecurringRule> get recurringRules => _recurringRules;
+  List<RecurringOccurrence> _recurringOccurrences = const [];
+  List<RecurringOccurrence> get recurringOccurrences => _recurringOccurrences;
 
   static Future<LedgerStore> open({
     String? path,
     DatabaseFactory? factory,
   }) async {
-    if (factory == null && (Platform.isWindows || Platform.isLinux)) {
-      sqfliteFfiInit();
-      factory = databaseFactoryFfi;
-    }
-    final location =
-        path ??
-        p.join((await getApplicationSupportDirectory()).path, 'moneva.sqlite');
-    final db = await (factory ?? databaseFactorySqflitePlugin).openDatabase(
-      location,
-      options: OpenDatabaseOptions(
-        version: 10,
-        onUpgrade: (db, oldVersion, newVersion) async {
-          if (oldVersion < 2) {
-            await db.execute(
-              'CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
-            );
-          }
-          if (oldVersion < 3) {
-            await _createCategories(db);
-          }
-          if (oldVersion < 4) {
-            await _upgradeAccounts(db);
-          }
-          if (oldVersion < 5) {
-            await _addOverdraftPolicy(db);
-          }
-          if (oldVersion < 6) {
-            await _createRecurring(db);
-          }
-          if (oldVersion < 7) {
-            await _addCategoryIcons(db);
-          }
-          if (oldVersion < 8) {
-            await _addRecurringTypes(db);
-          }
-          if (oldVersion < 9) {
-            await _createReceipts(db);
-          }
-          if (oldVersion < 10) {
-            await _createInvoiceBatches(db);
-          }
-        },
-        onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
-        onCreate: (db, version) async {
-          await db.execute(
-            'CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
-          );
-          await db.execute(
-            "CREATE TABLE accounts (id INTEGER PRIMARY KEY, name TEXT NOT NULL, currency TEXT NOT NULL CHECK(currency IN ('eur','iqd')), opening INTEGER NOT NULL, as_of TEXT NOT NULL, available INTEGER NOT NULL CHECK(available IN (0,1)))",
-          );
-          await db.execute(
-            "CREATE TABLE transactions (id INTEGER PRIMARY KEY, type TEXT NOT NULL CHECK(type IN ('expense','income','refund','transfer')), amount INTEGER NOT NULL CHECK(amount > 0 AND amount <= 9000000000000000), currency TEXT NOT NULL CHECK(currency IN ('eur','iqd')), date TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, account_id INTEGER REFERENCES accounts(id), destination_id INTEGER REFERENCES accounts(id), notes TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, CHECK(type != 'transfer' OR (account_id IS NOT NULL AND destination_id IS NOT NULL AND account_id != destination_id)))",
-          );
-          for (final column in [
-            'date',
-            'category',
-            'account_id',
-            'destination_id',
-          ]) {
-            await db.execute(
-              'CREATE INDEX transactions_$column ON transactions($column)',
-            );
-          }
-          await _createCategories(db);
-          await _upgradeAccounts(db);
-          await _addOverdraftPolicy(db);
-          await _createRecurring(db);
-          await _addCategoryIcons(db);
-          await _addRecurringTypes(db);
-          await _createReceipts(db);
-          await _createInvoiceBatches(db);
-        },
-      ),
-    );
+    final db = await LedgerDatabase.open(path: path, factory: factory);
     final store = LedgerStore(db);
     await store.refresh();
     return store;
   }
 
   Future<void> refresh() async {
-    final timeoutRows = await db.query(
-      'settings',
-      where: 'key = ?',
-      whereArgs: ['invoice_timeout_seconds'],
-    );
-    final savedTimeout = timeoutRows.isEmpty
-        ? null
-        : int.tryParse(timeoutRows.single['value'] as String);
-    invoiceTimeoutSeconds =
-        savedTimeout != null && savedTimeout >= 30 && savedTimeout <= 900
-        ? savedTimeout
-        : 180;
-    receiptTransactionIds = (await db.query(
-      'receipts',
-      columns: ['transaction_id'],
-    )).map((r) => r['transaction_id'] as int).toSet();
-    recurringRules = (await db.query(
-      'recurring_rules',
-      where: 'archived = 0',
-      orderBy: 'next_date',
-    )).map(RecurringRule.fromMap).toList();
-    recurringOccurrences = (await db.query(
-      'recurring_occurrences',
-      orderBy: 'scheduled_date DESC, id DESC',
-    )).map(RecurringOccurrence.fromMap).toList();
-    setupCompleted = (await db.query(
-      'settings',
-      where: 'key = ? AND value = ?',
-      whereArgs: ['setup_completed', 'true'],
-    )).isNotEmpty;
-    categories = (await db.query(
-      'categories',
-      orderBy: 'name COLLATE NOCASE',
-    )).map(LedgerCategory.fromMap).toList();
-    final settings = await db.query(
-      'settings',
-      where: 'key = ?',
-      whereArgs: ['financial_plan'],
-    );
-    final hasLegacyPlan =
-        settings.isNotEmpty &&
-        (jsonDecode(settings.single['value'] as String)
-                as Map<String, dynamic>)['currency'] !=
-            'eur';
-    hasLegacyCurrencyData =
-        hasLegacyPlan ||
-        (await db.query(
-          'transactions',
-          columns: ['id'],
-          where: 'currency != ?',
-          whereArgs: ['eur'],
-          limit: 1,
-        )).isNotEmpty ||
-        (await db.query(
-          'accounts',
-          columns: ['id'],
-          where: 'currency != ?',
-          whereArgs: ['eur'],
-          limit: 1,
-        )).isNotEmpty;
-    plan = settings.isEmpty || hasLegacyPlan
-        ? null
-        : FreedomPlan.fromMap(
-            jsonDecode(settings.single['value'] as String)
-                as Map<String, dynamic>,
-          );
-    entries = (await db.query(
-      'transactions',
-      where: 'currency = ?',
-      whereArgs: ['eur'],
-      orderBy: 'date DESC, id DESC',
-    )).map(LedgerEntry.fromMap).toList();
-    accounts = (await db.query(
-      'accounts',
-      where: 'currency = ?',
-      whereArgs: ['eur'],
-      orderBy: 'name',
-    )).map(Account.fromMap).toList();
+    final snapshot = await db.transaction((txn) async {
+      final settingRows = await txn.query('settings');
+      final settingsByKey = {
+        for (final row in settingRows)
+          row['key'] as String: row['value'] as String,
+      };
+      final savedTimeout = int.tryParse(
+        settingsByKey['invoice_timeout_seconds'] ?? '',
+      );
+      final timeout =
+          savedTimeout != null && savedTimeout >= 30 && savedTimeout <= 900
+          ? savedTimeout
+          : 180;
+      final receiptIds = (await txn.query(
+        'receipts',
+        columns: ['transaction_id'],
+      )).map((r) => r['transaction_id'] as int).toSet();
+      final rules = (await txn.query(
+        'recurring_rules',
+        where: 'archived = 0',
+        orderBy: 'next_date',
+      )).map(RecurringRule.fromMap).toList();
+      final occurrences = (await txn.query(
+        'recurring_occurrences',
+        orderBy: 'scheduled_date DESC, id DESC',
+      )).map(RecurringOccurrence.fromMap).toList();
+      final setup = settingsByKey['setup_completed'] == 'true';
+      final categoryList = (await txn.query(
+        'categories',
+        orderBy: 'name COLLATE NOCASE',
+      )).map(LedgerCategory.fromMap).toList();
+      final planJson = settingsByKey['financial_plan'];
+      final planData = planJson == null
+          ? null
+          : jsonDecode(planJson) as Map<String, dynamic>;
+      final hasLegacyPlan = planData != null && planData['currency'] != 'eur';
+      final legacy =
+          hasLegacyPlan ||
+          (await txn.query(
+            'transactions',
+            columns: ['id'],
+            where: 'currency != ?',
+            whereArgs: ['eur'],
+            limit: 1,
+          )).isNotEmpty ||
+          (await txn.query(
+            'accounts',
+            columns: ['id'],
+            where: 'currency != ?',
+            whereArgs: ['eur'],
+            limit: 1,
+          )).isNotEmpty;
+      final nextPlan = planData == null || hasLegacyPlan
+          ? null
+          : FreedomPlan.fromMap(planData);
+      final entryList = (await txn.query(
+        'transactions',
+        where: 'currency = ?',
+        whereArgs: ['eur'],
+        orderBy: 'date DESC, id DESC',
+      )).map(LedgerEntry.fromMap).toList();
+      final accountList = (await txn.query(
+        'accounts',
+        where: 'currency = ?',
+        whereArgs: ['eur'],
+        orderBy: 'name',
+      )).map(Account.fromMap).toList();
+      return (
+        timeout: timeout,
+        receiptIds: receiptIds,
+        rules: rules,
+        occurrences: occurrences,
+        setup: setup,
+        categories: categoryList,
+        legacy: legacy,
+        plan: nextPlan,
+        entries: entryList,
+        accounts: accountList,
+      );
+    });
+    invoiceTimeoutSeconds = snapshot.timeout;
+    _receiptTransactionIds = Set.unmodifiable(snapshot.receiptIds);
+    _recurringRules = List.unmodifiable(snapshot.rules);
+    _recurringOccurrences = List.unmodifiable(snapshot.occurrences);
+    setupCompleted = snapshot.setup;
+    _categories = List.unmodifiable(snapshot.categories);
+    _categoriesByKind = {
+      for (final kind in CategoryKind.values)
+        kind: List.unmodifiable(categories.where((c) => c.kind == kind)),
+    };
+    _categoriesByName = {
+      for (final category in categories)
+        (category.kind, category.name): category,
+    };
+    hasLegacyCurrencyData = snapshot.legacy;
+    plan = snapshot.plan;
+    _ledger = LedgerIndex(snapshot.entries);
+    _accounts = List.unmodifiable(snapshot.accounts);
+    _balances = null;
     notifyListeners();
   }
 
@@ -623,16 +599,6 @@ class LedgerStore extends ChangeNotifier {
     await refresh();
   }
 
-  static Future<void> _addOverdraftPolicy(DatabaseExecutor db) async {
-    await db.execute(
-      'ALTER TABLE accounts ADD COLUMN allow_overdraft INTEGER NOT NULL DEFAULT 0 CHECK(allow_overdraft IN (0,1))',
-    );
-    // Existing bank accounts previously allowed overdrafts; preserve their policy.
-    await db.execute(
-      "UPDATE accounts SET allow_overdraft = 1 WHERE kind = 'bank'",
-    );
-  }
-
   static Future<void> _checkFunds(
     DatabaseExecutor db,
     Iterable<int> ids,
@@ -663,10 +629,7 @@ class LedgerStore extends ChangeNotifier {
         }
         var delta = 0;
         if (entry.accountId == id) {
-          delta =
-              (entry.type == EntryType.income || entry.type == EntryType.refund)
-              ? entry.amount
-              : -entry.amount;
+          delta = entry.accountChange;
         }
         if (entry.type == EntryType.transfer && entry.destinationId == id) {
           delta += entry.amount;
@@ -691,15 +654,6 @@ class LedgerStore extends ChangeNotifier {
         }
       }
     }
-  }
-
-  static Future<void> _upgradeAccounts(DatabaseExecutor db) async {
-    await db.execute(
-      "ALTER TABLE accounts ADD COLUMN kind TEXT NOT NULL DEFAULT 'bank' CHECK(kind IN ('cash','bank'))",
-    );
-    await db.execute(
-      'ALTER TABLE accounts ADD COLUMN include_on_as_of INTEGER NOT NULL DEFAULT 0 CHECK(include_on_as_of IN (0,1))',
-    );
   }
 
   Future<void> completeSetup(List<Account> newAccounts) async {
@@ -735,54 +689,6 @@ class LedgerStore extends ChangeNotifier {
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     });
     await refresh();
-  }
-
-  static Future<void> _createCategories(DatabaseExecutor db) async {
-    await db.execute(
-      "CREATE TABLE categories (id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('expense','income')), name TEXT NOT NULL CHECK(length(trim(name)) > 0), UNIQUE(kind, name COLLATE NOCASE))",
-    );
-    // Preserve every existing label exactly, before adding suggestions.
-    final existing = await db.rawQuery(
-      "SELECT DISTINCT category AS name, CASE WHEN type = 'income' THEN 'income' ELSE 'expense' END AS kind FROM transactions WHERE type != 'transfer'",
-    );
-    for (final row in existing) {
-      await db.insert(
-        'categories',
-        row,
-        conflictAlgorithm: ConflictAlgorithm.ignore,
-      );
-    }
-    for (final kind in CategoryKind.values) {
-      final names = kind == CategoryKind.expense
-          ? [
-              'Other',
-              'Groceries',
-              'Dining out',
-              'Transport',
-              'Rent & utilities',
-              'Health',
-              'Shopping',
-              'Entertainment',
-              'Education',
-              'Insurance',
-              'Subscriptions',
-              'Travel',
-            ]
-          : [
-              'Other',
-              'Salary',
-              'Freelance',
-              'Rental income',
-              'Investment income',
-              'Gifts',
-            ];
-      for (final name in names) {
-        await db.insert('categories', {
-          'kind': kind.name,
-          'name': name,
-        }, conflictAlgorithm: ConflictAlgorithm.ignore);
-      }
-    }
   }
 
   Future<void> saveCategory({
@@ -875,58 +781,6 @@ class LedgerStore extends ChangeNotifier {
       }
     });
     await refresh();
-  }
-
-  static Future<void> _addCategoryIcons(DatabaseExecutor db) async {
-    await db.execute(
-      "ALTER TABLE categories ADD COLUMN icon TEXT NOT NULL DEFAULT 'general'",
-    );
-    const defaults = <String, CategoryIcon>{
-      'Groceries': CategoryIcon.groceries,
-      'Dining out': CategoryIcon.dining,
-      'Transport': CategoryIcon.transport,
-      'Rent & utilities': CategoryIcon.home,
-      'Health': CategoryIcon.health,
-      'Shopping': CategoryIcon.shopping,
-      'Entertainment': CategoryIcon.entertainment,
-      'Education': CategoryIcon.education,
-      'Insurance': CategoryIcon.insurance,
-      'Subscriptions': CategoryIcon.subscriptions,
-      'Travel': CategoryIcon.travel,
-      'Salary': CategoryIcon.salary,
-      'Freelance': CategoryIcon.freelance,
-      'Rental income': CategoryIcon.home,
-      'Investment income': CategoryIcon.investments,
-      'Gifts': CategoryIcon.gifts,
-    };
-    for (final entry in defaults.entries) {
-      await db.update(
-        'categories',
-        {'icon': entry.value.name},
-        where: 'name = ?',
-        whereArgs: [entry.key],
-      );
-    }
-  }
-
-  static Future<void> _addRecurringTypes(DatabaseExecutor db) async {
-    for (final table in ['recurring_rules', 'recurring_occurrences']) {
-      await db.execute(
-        "ALTER TABLE $table ADD COLUMN type TEXT NOT NULL DEFAULT 'expense' CHECK(type IN ('expense','income'))",
-      );
-    }
-  }
-
-  static Future<void> _createRecurring(DatabaseExecutor db) async {
-    await db.execute(
-      'CREATE TABLE recurring_rules (id INTEGER PRIMARY KEY, description TEXT NOT NULL, amount INTEGER NOT NULL CHECK(amount > 0), category TEXT NOT NULL, account_id INTEGER NOT NULL REFERENCES accounts(id), day INTEGER NOT NULL CHECK(day BETWEEN 1 AND 31), interval INTEGER NOT NULL CHECK(interval BETWEEN 1 AND 120), next_date TEXT NOT NULL, end_date TEXT, active INTEGER NOT NULL, archived INTEGER NOT NULL DEFAULT 0)',
-    );
-    await db.execute(
-      "CREATE TABLE recurring_occurrences (id INTEGER PRIMARY KEY, rule_id INTEGER NOT NULL REFERENCES recurring_rules(id), scheduled_date TEXT NOT NULL, description TEXT NOT NULL, amount INTEGER NOT NULL, category TEXT NOT NULL, account_id INTEGER NOT NULL REFERENCES accounts(id), status TEXT NOT NULL CHECK(status IN ('posted','failed','skipped')), error TEXT, transaction_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL, UNIQUE(rule_id, scheduled_date))",
-    );
-    await db.execute(
-      'CREATE INDEX recurring_due ON recurring_rules(active, archived, next_date)',
-    );
   }
 
   Future<void> saveRecurring(RecurringRule rule, {DateTime? today}) async {
@@ -1181,30 +1035,6 @@ class LedgerStore extends ChangeNotifier {
       whereArgs: [id],
     );
     await refresh();
-  }
-
-  static Future<void> _createReceipts(DatabaseExecutor db) async {
-    await db.execute(
-      'CREATE TABLE receipts (id INTEGER PRIMARY KEY, transaction_id INTEGER NOT NULL UNIQUE REFERENCES transactions(id) ON DELETE CASCADE, total INTEGER NOT NULL, draft TEXT NOT NULL, image_paths TEXT NOT NULL, raw_response TEXT NOT NULL, scanned_at TEXT NOT NULL)',
-    );
-    await db.execute(
-      'CREATE TABLE receipt_items (id INTEGER PRIMARY KEY, transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE, description TEXT NOT NULL, quantity TEXT NOT NULL, unit_price INTEGER, total INTEGER NOT NULL, category TEXT NOT NULL, edited INTEGER NOT NULL, position INTEGER NOT NULL)',
-    );
-    await db.execute(
-      'CREATE INDEX receipt_items_transaction ON receipt_items(transaction_id)',
-    );
-  }
-
-  static Future<void> _createInvoiceBatches(DatabaseExecutor db) async {
-    await db.execute(
-      'CREATE TABLE scanned_invoices (id INTEGER PRIMARY KEY, draft TEXT NOT NULL, image_paths TEXT NOT NULL, raw_response TEXT NOT NULL, created_at TEXT NOT NULL)',
-    );
-    await db.execute(
-      'CREATE TABLE scanned_invoice_entries (transaction_id INTEGER PRIMARY KEY REFERENCES transactions(id) ON DELETE CASCADE, batch_id INTEGER NOT NULL REFERENCES scanned_invoices(id) ON DELETE CASCADE)',
-    );
-    await db.execute(
-      'CREATE INDEX scanned_invoice_batch ON scanned_invoice_entries(batch_id)',
-    );
   }
 
   Future<Map<String, Object?>?> scannedInvoiceFor(int transactionId) async =>

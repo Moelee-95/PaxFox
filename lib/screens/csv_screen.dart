@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../core/data/ledger_store.dart';
 import '../core/data/transaction_csv.dart';
 import '../core/domain/ledger.dart';
+import '../core/presentation/bottom_action_bar.dart';
 
 typedef CsvFile = ({String name, Uint8List bytes});
 
@@ -342,15 +343,13 @@ class _CsvScreenState extends State<CsvScreen> {
           );
         },
       ),
-      bottomNavigationBar: SafeArea(
-        minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-        child: FilledButton.icon(
-          onPressed: busy || rows.isEmpty || data!.errors.isNotEmpty
-              ? null
-              : import,
-          icon: const Icon(Icons.file_upload_outlined),
-          label: Text(busy ? 'Working…' : 'Import transactions'),
-        ),
+      bottomNavigationBar: BottomActionBar(
+        label: 'Import transactions',
+        busy: busy,
+        busyLabel: 'Working…',
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+        icon: Icons.file_upload_outlined,
+        onPressed: rows.isEmpty || data!.errors.isNotEmpty ? null : import,
       ),
     );
   }

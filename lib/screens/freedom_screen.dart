@@ -13,6 +13,19 @@ class FreedomScreen extends StatefulWidget {
 
 class _FreedomScreenState extends State<FreedomScreen> {
   bool loseSalary = false;
+  FreedomPlan? _projectedPlan;
+  bool? _projectedSalaryLoss;
+  FreedomProjection? _projection;
+
+  FreedomProjection _projectionFor(FreedomPlan plan) {
+    if (_projectedPlan != plan || _projectedSalaryLoss != loseSalary) {
+      _projection = projectFreedom(plan, loseSalary: loseSalary);
+      _projectedPlan = plan;
+      _projectedSalaryLoss = loseSalary;
+    }
+    return _projection!;
+  }
+
   @override
   Widget build(BuildContext context) {
     final plan = widget.store.plan;
@@ -41,7 +54,7 @@ class _FreedomScreenState extends State<FreedomScreen> {
         ),
       );
     }
-    final projection = projectFreedom(plan, loseSalary: loseSalary);
+    final projection = _projectionFor(plan);
     final now = projection.months.first;
     final currency = plan.currency;
     String money(int value) => currency.display(value);

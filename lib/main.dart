@@ -69,9 +69,9 @@ class _MyAppState extends State<MyApp> {
         final store = snapshot.data!;
         return ListenableBuilder(
           listenable: store,
-          builder: (context, _) => store.setupCompleted
-              ? MainScreen(store: store)
-              : SetupScreen(store: store),
+          child: MainScreen(store: store),
+          builder: (context, child) =>
+              store.setupCompleted ? child! : SetupScreen(store: store),
         );
       },
     ),
