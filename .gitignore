@@ -32,6 +32,7 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+/Design
 
 # Symbolication related
 app.*.symbols
@@ -46,3 +47,11 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Private financial data must never be committed.
+Personal Expenses.xlsx
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+Moneva_Codex_Implementation_Prompt.md
