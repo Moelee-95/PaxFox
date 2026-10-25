@@ -427,7 +427,7 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
                             Text(
                               items[i].total == null
                                   ? 'Check price'
-                                  : 'EUR ${Currency.eur.format(items[i].total!)}',
+                                  : '€${Currency.eur.format(items[i].total!)}',
                             ),
                             IconButton(
                               tooltip: 'Delete item',
@@ -458,12 +458,12 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
                 icon: const Icon(Icons.add),
                 label: const Text('Add item'),
               ),
-              Text('Item subtotal: EUR ${Currency.eur.format(sum)}'),
+              Text('Item subtotal: €${Currency.eur.format(sum)}'),
               TextFormField(
                 controller: adjustment,
                 enabled: !busy,
                 decoration: const InputDecoration(
-                  labelText: 'Adjustment (EUR, signed)',
+                  labelText: 'Adjustment (€, signed)',
                 ),
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
@@ -490,7 +490,7 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
                 controller: total,
                 enabled: !busy,
                 decoration: const InputDecoration(
-                  labelText: 'Charged total (EUR)',
+                  labelText: 'Charged total (€)',
                 ),
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
@@ -585,7 +585,7 @@ class _InvoiceItemDialogState extends State<InvoiceItemDialog> {
             ),
             TextFormField(
               controller: price,
-              decoration: const InputDecoration(labelText: 'Price (EUR)'),
+              decoration: const InputDecoration(labelText: 'Price (€)'),
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
                 signed: true,

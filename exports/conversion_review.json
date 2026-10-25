@@ -1,0 +1,63 @@
+{
+  "rows": 324,
+  "pending_dates": [],
+  "zero_cost_excluded": [
+    {
+      "record": 239,
+      "date": "30.5.26",
+      "details": "Fur Manar: 1 KG Beinscheibe \nLammfleisch mit Knochen, 0.5 Lammfleisch mit etwas Fett ohne Knochen",
+      "reason": "Zero net cost",
+      "notes": "Sie hat bezalht 36.79"
+    },
+    {
+      "record": 373,
+      "date": "1/20/2026",
+      "details": "Nacking off my tooth",
+      "reason": "Zero net cost",
+      "notes": "I got paid back the 108.32"
+    }
+  ],
+  "changes": [
+    {
+      "record": 134,
+      "details": "Cavusoglu Lebensmittel",
+      "change": "Missing category set to Uncategorized"
+    },
+    {
+      "record": 215,
+      "date": "11.5.26",
+      "change": "Missing details replaced with a neutral placeholder"
+    },
+    {
+      "record": 265,
+      "details": "Yorma's m nachen contai",
+      "change": "Missing category set to Uncategorized"
+    },
+    {
+      "record": 332,
+      "details": "lebenon Brot",
+      "change": "Missing category set to Uncategorized"
+    },
+    {
+      "record": 5,
+      "details": "Rent and Utilites",
+      "change": "Missing date set to 1.10.26, as confirmed by user"
+    },
+    {
+      "record": 31,
+      "details": "Bank accout fee",
+      "change": "Missing date set to 1.9.26, as confirmed by user"
+    },
+    {
+      "record": 32,
+      "details": "Deustchland Ticket",
+      "change": "Missing date set to 1.9.26, as confirmed by user"
+    },
+    {
+      "record": 33,
+      "details": "Rent and Utilites",
+      "change": "Missing date set to 1.9.26, as confirmed by user"
+    }
+  ],
+  "total_eur": "12171.64"
+}

@@ -11,6 +11,7 @@ import '../domain/ledger.dart';
 import '../domain/freedom.dart';
 import '../domain/category.dart';
 import '../domain/recurring.dart';
+import 'transaction_csv.dart';
 import '../../features/receipts/invoice.dart';
 import '../../features/receipts/invoice_images.dart';
 
@@ -246,10 +247,99 @@ class LedgerStore extends ChangeNotifier {
     await refresh();
   }
 
+  /// Imports the whole file atomically, including any new categories.
+  /// Matching existing rows are consumed as a multiset: repeated purchases
+  /// inside a file remain repeated purchases rather than being collapsed.
+  Future<({int imported, int skipped})> importCsv(
+    List<CsvTransactionRow> rows, {
+    bool skipExisting = true,
+  }) async {
+    if (rows.isEmpty || rows.length > TransactionCsv.maxRows) {
+      throw ArgumentError('Choose between 1 and 5,000 transactions.');
+    }
+    var imported = 0;
+    var skipped = 0;
+    await db.transaction((txn) async {
+      String signature(LedgerEntry e) => jsonEncode(e.toMap());
+      final existing = <String, int>{};
+      if (skipExisting) {
+        for (final record in await txn.query('transactions')) {
+          final key = signature(LedgerEntry.fromMap(record));
+          existing[key] = (existing[key] ?? 0) + 1;
+        }
+      }
+      final categories = (await txn.query('categories'))
+          .map(LedgerCategory.fromMap)
+          .toList();
+      final ordered = [...rows]
+        ..sort((a, b) {
+          final date = a.entry.date.compareTo(b.entry.date);
+          return date != 0 ? date : a.number.compareTo(b.number);
+        });
+      for (final row in ordered) {
+        try {
+          final source = row.entry;
+          if (source.id != null || source.type == EntryType.transfer) {
+            throw ArgumentError('Choose an expense, income or refund type.');
+          }
+          final kind = categoryKind(source.type);
+          var category = categories
+              .where(
+                (c) =>
+                    c.kind == kind &&
+                    c.name.toLowerCase() ==
+                        source.category.trim().toLowerCase(),
+              )
+              .firstOrNull;
+          if (category == null) {
+            if (source.category.trim().isEmpty) {
+              throw ArgumentError('Category is required.');
+            }
+            final id = await txn.insert('categories', {
+              'kind': kind.name,
+              'name': source.category.trim(),
+              'icon': 'general',
+            });
+            category = LedgerCategory(
+              id: id,
+              name: source.category.trim(),
+              kind: kind,
+            );
+            categories.add(category);
+          }
+          final entry = LedgerEntry(
+            type: source.type,
+            amount: source.amount,
+            currency: source.currency,
+            date: source.date,
+            description: source.description,
+            category: category.name,
+            accountId: source.accountId,
+            notes: source.notes,
+          );
+          final key = signature(entry);
+          if ((existing[key] ?? 0) > 0) {
+            existing[key] = existing[key]! - 1;
+            skipped++;
+            continue;
+          }
+          await _writeEntry(txn, entry, allowUnassigned: true);
+          imported++;
+        } on ArgumentError catch (e) {
+          throw FormatException('Row ${row.number}: ${e.message}');
+        }
+      }
+    });
+    await refresh();
+    return (imported: imported, skipped: skipped);
+  }
+
   static Future<int> _writeEntry(
     DatabaseExecutor txn,
-    LedgerEntry entry,
-  ) async {
+    LedgerEntry entry, {
+    bool allowUnassigned = false,
+    bool checkFunds = true,
+  }) async {
     if (entry.id != null) {
       final rows = await txn.query(
         'receipts',
@@ -279,7 +369,9 @@ class LedgerStore extends ChangeNotifier {
             whereArgs: [entry.id],
           );
     if ((entry.type == EntryType.expense || entry.type == EntryType.income) &&
-        entry.accountId == null) {
+        entry.accountId == null &&
+        !allowUnassigned &&
+        (previous.isEmpty || previous.single['account_id'] != null)) {
       throw ArgumentError(
         'Choose cash or a bank account for this transaction.',
       );
@@ -349,75 +441,140 @@ class LedgerStore extends ChangeNotifier {
         throw StateError('Transaction no longer exists.');
       }
     }
-    await _checkFunds(
-      txn,
-      {
-        entry.accountId,
-        entry.destinationId,
-        if (previous.isNotEmpty) previous.single['account_id'] as int?,
-        if (previous.isNotEmpty) previous.single['destination_id'] as int?,
-      }.whereType<int>(),
-    );
+    if (checkFunds) {
+      await _checkFunds(
+        txn,
+        {
+          entry.accountId,
+          entry.destinationId,
+          if (previous.isNotEmpty) previous.single['account_id'] as int?,
+          if (previous.isNotEmpty) previous.single['destination_id'] as int?,
+        }.whereType<int>(),
+      );
+    }
     return savedId!;
   }
 
-  Future<void> deleteEntry(int id) async {
-    final imagePaths = <String>[];
+  Future<void> deleteEntry(int id) => deleteEntries({id});
+
+  Future<void> updateEntries(
+    Set<int> ids, {
+    String? category,
+    int? accountId,
+    bool changeAccount = false,
+  }) async {
     await db.transaction((txn) async {
-      final links = await txn.query(
-        'scanned_invoice_entries',
-        where: 'transaction_id = ?',
-        whereArgs: [id],
-      );
-      for (final receipt in await txn.query(
-        'receipts',
-        where: 'transaction_id = ?',
-        whereArgs: [id],
-      )) {
-        imagePaths.addAll(
-          (jsonDecode(receipt['image_paths'] as String) as List).cast<String>(),
+      final affected = <int>{};
+      for (final id in ids) {
+        final rows = await txn.query(
+          'transactions',
+          where: 'id = ?',
+          whereArgs: [id],
         );
-      }
-      final rows = await txn.query(
-        'transactions',
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-      await txn.delete('transactions', where: 'id = ?', whereArgs: [id]);
-      if (rows.isNotEmpty) {
-        await _checkFunds(
-          txn,
-          [
-            rows.single['account_id'],
-            rows.single['destination_id'],
-          ].whereType<int>(),
-        );
-      }
-      for (final link in links) {
-        final batchId = link['batch_id'];
-        if ((await txn.query(
-          'scanned_invoice_entries',
-          where: 'batch_id = ?',
-          whereArgs: [batchId],
-        )).isEmpty) {
-          final batches = await txn.query(
-            'scanned_invoices',
-            where: 'id = ?',
-            whereArgs: [batchId],
+        if (rows.isEmpty) {
+          throw ArgumentError('A selected transaction no longer exists.');
+        }
+        final old = LedgerEntry.fromMap(rows.single);
+        if (old.type == EntryType.transfer) {
+          throw ArgumentError(
+            'Edit transfers individually to choose both accounts.',
           );
-          for (final batch in batches) {
-            imagePaths.addAll(
-              (jsonDecode(batch['image_paths'] as String) as List)
-                  .cast<String>(),
-            );
-          }
-          await txn.delete(
-            'scanned_invoices',
-            where: 'id = ?',
-            whereArgs: [batchId],
+        }
+        if (category != null &&
+            (await txn.query(
+              'receipts',
+              where: 'transaction_id = ?',
+              whereArgs: [id],
+            )).isNotEmpty) {
+          throw ArgumentError(
+            'Change categories on older single-expense invoices in invoice review.',
+          );
+        }
+        final updated = LedgerEntry.fromMap({
+          ...old.toMap(),
+          'id': id,
+          'category': ?category,
+          if (changeAccount) 'account_id': accountId,
+        });
+        affected.addAll([old.accountId, updated.accountId].whereType<int>());
+        await _writeEntry(
+          txn,
+          updated,
+          allowUnassigned: changeAccount,
+          checkFunds: false,
+        );
+        if (category != null) {
+          await txn.update(
+            'receipt_items',
+            {'category': category, 'edited': 1},
+            where: 'transaction_id = ?',
+            whereArgs: [id],
           );
         }
       }
+      await _checkFunds(txn, affected);
+    });
+    await refresh();
+  }
+
+  Future<void> deleteEntries(Set<int> ids) async {
+    final imagePaths = <String>[];
+    await db.transaction((txn) async {
+      final affected = <int>{};
+      for (final id in ids) {
+        final links = await txn.query(
+          'scanned_invoice_entries',
+          where: 'transaction_id = ?',
+          whereArgs: [id],
+        );
+        for (final receipt in await txn.query(
+          'receipts',
+          where: 'transaction_id = ?',
+          whereArgs: [id],
+        )) {
+          imagePaths.addAll(
+            (jsonDecode(receipt['image_paths'] as String) as List)
+                .cast<String>(),
+          );
+        }
+        final rows = await txn.query(
+          'transactions',
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        await txn.delete('transactions', where: 'id = ?', whereArgs: [id]);
+        for (final row in rows) {
+          affected.addAll(
+            [row['account_id'], row['destination_id']].whereType<int>(),
+          );
+        }
+        for (final link in links) {
+          final batchId = link['batch_id'];
+          if ((await txn.query(
+            'scanned_invoice_entries',
+            where: 'batch_id = ?',
+            whereArgs: [batchId],
+          )).isEmpty) {
+            final batches = await txn.query(
+              'scanned_invoices',
+              where: 'id = ?',
+              whereArgs: [batchId],
+            );
+            for (final batch in batches) {
+              imagePaths.addAll(
+                (jsonDecode(batch['image_paths'] as String) as List)
+                    .cast<String>(),
+              );
+            }
+            await txn.delete(
+              'scanned_invoices',
+              where: 'id = ?',
+              whereArgs: [batchId],
+            );
+          }
+        }
+      }
+      await _checkFunds(txn, affected);
     });
     if (imagePaths.isNotEmpty) {
       await InvoiceImages().remove(imagePaths);

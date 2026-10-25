@@ -44,7 +44,7 @@ class _FreedomScreenState extends State<FreedomScreen> {
     final projection = projectFreedom(plan, loseSalary: loseSalary);
     final now = projection.months.first;
     final currency = plan.currency;
-    String money(int value) => '${currency.code} ${currency.format(value)}';
+    String money(int value) => currency.display(value);
     final draw =
         (BigInt.from(plan.portfolio) *
                 BigInt.from(plan.withdrawalBps) ~/
@@ -251,7 +251,7 @@ class _PlanFormState extends State<PlanForm> {
           const Text(
             'Fill every balance and income explicitly; enter 0 when known to be zero. 4% withdrawal is an editable illustration. This model uses no live market data.',
           ),
-          const Text('Currency: EUR (€)'),
+          const Text('Currency: €'),
           ListTile(
             title: Text('Forecast start: ${dayKey(start)}'),
             onTap: () async {

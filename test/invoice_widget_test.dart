@@ -169,7 +169,7 @@ void main() {
       );
       await tester.tap(find.text('Missing item name'));
       await tester.pumpAndSettle();
-      expect(find.text('Price (EUR)'), findsOneWidget);
+      expect(find.text('Price (€)'), findsOneWidget);
       expect(find.text('Quantity'), findsNothing);
       expect(find.text('Unit price (optional EUR)'), findsNothing);
       expect(store.entries, isEmpty);
@@ -218,7 +218,7 @@ void main() {
         'Reviewed milk',
       );
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Price (EUR)'),
+        find.widgetWithText(TextFormField, 'Price (€)'),
         '12',
       );
       await tester.tap(find.text('Apply item'));
@@ -234,7 +234,7 @@ void main() {
         findsOneWidget,
       );
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Charged total (EUR)'),
+        find.widgetWithText(TextFormField, 'Charged total (€)'),
         '12',
       );
       await tester.tap(find.text('Save transactions'));

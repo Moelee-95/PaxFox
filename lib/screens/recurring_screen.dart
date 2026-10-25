@@ -124,7 +124,7 @@ class _RecurringScreenState extends State<RecurringScreen> {
                           : Colors.red,
                     ),
                     subtitle: Text(
-                      '${rule.type == EntryType.income ? 'Income' : 'Expense'} - EUR ${Currency.eur.format(rule.amount)} - ${widget.store.accounts.where((a) => a.id == rule.accountId).firstOrNull?.name ?? 'Account unavailable'}\n${rule.active ? 'Next' : 'Paused; scheduled'}: ${dayKey(rule.nextDate)} - every ${rule.interval} month(s), day ${rule.day}',
+                      '${rule.type == EntryType.income ? 'Income' : 'Expense'} - €${Currency.eur.format(rule.amount)} - ${widget.store.accounts.where((a) => a.id == rule.accountId).firstOrNull?.name ?? 'Account unavailable'}\n${rule.active ? 'Next' : 'Paused; scheduled'}: ${dayKey(rule.nextDate)} - every ${rule.interval} month(s), day ${rule.day}',
                     ),
                     isThreeLine: true,
                     trailing: const Icon(Icons.edit_outlined),
@@ -163,7 +163,7 @@ class _RecurringScreenState extends State<RecurringScreen> {
                 children: [
                   ListTile(
                     title: Text(
-                      '${occurrence.description} - EUR ${Currency.eur.format(occurrence.amount)}',
+                      '${occurrence.description} - €${Currency.eur.format(occurrence.amount)}',
                     ),
                     subtitle: Text(
                       '${occurrence.type.name} - ${dayKey(occurrence.date)} - ${occurrence.status == 'posted' && occurrence.transactionId == null ? 'Posted, then deleted manually' : occurrence.status}${occurrence.error == null ? '' : '\n${occurrence.error}'}',
@@ -377,7 +377,7 @@ class _RecurringFormState extends State<RecurringForm> {
             TextFormField(
               controller: amount,
               enabled: !busy,
-              decoration: const InputDecoration(labelText: 'Amount (EUR)'),
+              decoration: const InputDecoration(labelText: 'Amount (€)'),
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),

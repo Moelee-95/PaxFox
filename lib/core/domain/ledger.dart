@@ -7,6 +7,8 @@ enum Currency {
 
   const Currency(this.code, this.exponent);
   final String code;
+  String get symbol => this == Currency.eur ? '\u20ac' : code;
+  String display(int minor) => '$symbol${format(minor)}';
   final int exponent;
   int get scale => exponent == 2 ? 100 : 1000;
 

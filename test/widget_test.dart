@@ -61,6 +61,8 @@ void main() {
       await tester.runAsync(prepareAccounts);
       await tester.pumpWidget(MyApp(store: store));
       await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Previous month'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Overview'));
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Add transaction'));
@@ -96,21 +98,68 @@ void main() {
     },
   );
 
+  testWidgets('month selector swipes change months without switching screens', (
+    tester,
+  ) async {
+    await tester.runAsync(prepareAccounts);
+    await tester.pumpWidget(MyApp(store: store));
+    await tester.pumpAndSettle();
+    final selector = find.byKey(const ValueKey('month-selector'));
+    final context = tester.element(selector);
+    final labels = MaterialLocalizations.of(context);
+    final now = DateTime.now();
+    expect(find.text(labels.formatMonthYear(now)), findsOneWidget);
+    final currentLabel = find.text(labels.formatMonthYear(now));
+    final initialX = tester.getCenter(currentLabel).dx;
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const ValueKey('month-pages'))),
+    );
+    await gesture.moveBy(const Offset(-30, 0));
+    await tester.pump();
+    await gesture.moveBy(const Offset(-30, 0));
+    await tester.pump();
+    expect(tester.getCenter(currentLabel).dx, lessThan(initialX));
+    await gesture.cancel();
+    await tester.pumpAndSettle();
+    await tester.fling(selector, const Offset(-220, 0), 700);
+    await tester.pumpAndSettle();
+    expect(
+      find.text(labels.formatMonthYear(DateTime(now.year, now.month + 1))),
+      findsOneWidget,
+    );
+    expect(
+      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      0,
+    );
+    await tester.fling(selector, const Offset(220, 0), 700);
+    await tester.pumpAndSettle();
+    expect(find.text(labels.formatMonthYear(now)), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('horizontal swipes and navigation taps stay synchronized', (
     tester,
   ) async {
     await tester.runAsync(prepareAccounts);
     await tester.pumpWidget(MyApp(store: store));
     await tester.pumpAndSettle();
-    for (var index = 1; index < 4; index++) {
-      await tester.drag(find.byType(PageView), const Offset(-650, 0));
+    await tester.tap(find.text('Overview'));
+    await tester.pumpAndSettle();
+    for (var index = 2; index < 4; index++) {
+      await tester.drag(
+        find.byKey(const ValueKey('main-pages')),
+        const Offset(-650, 0),
+      );
       await tester.pumpAndSettle();
       expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
         index,
       );
     }
-    await tester.drag(find.byType(PageView), const Offset(650, 0));
+    await tester.drag(
+      find.byKey(const ValueKey('main-pages')),
+      const Offset(650, 0),
+    );
     await tester.pumpAndSettle();
     expect(
       tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
@@ -122,11 +171,11 @@ void main() {
       tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
       0,
     );
-    await tester.drag(find.byType(PageView), const Offset(-650, 0));
+    await tester.tap(find.text('Transactions'));
     await tester.pumpAndSettle();
     expect(
       tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-      1,
+      3,
     );
     expect(tester.takeException(), isNull);
   });
@@ -169,7 +218,7 @@ void main() {
         'Monthly salary',
       );
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Amount (EUR)'),
+        find.widgetWithText(TextFormField, 'Amount (€)'),
         '20',
       );
       await tester.tap(find.byType(DropdownButtonFormField<String>));
@@ -251,6 +300,8 @@ void main() {
         }
       });
       await tester.pumpWidget(MyApp(store: store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Transactions'));
       await tester.pumpAndSettle();
       for (final type in EntryType.values) {
         final tile = tester.widget<ListTile>(
@@ -420,9 +471,9 @@ void main() {
       );
       await tester.tap(find.text('Overview'));
       await tester.pumpAndSettle();
-      expect(find.text('Account wealth: EUR 175.00'), findsOneWidget);
-      expect(find.text('Available to spend: EUR 100.00'), findsOneWidget);
-      expect(find.text('Excludes blocked accounts: EUR 75.00'), findsOneWidget);
+      expect(find.text('Account wealth: €175.00'), findsOneWidget);
+      expect(find.text('Available to spend: €100.00'), findsOneWidget);
+      expect(find.text('Excludes blocked accounts: €75.00'), findsOneWidget);
       await tester.tap(find.byTooltip('Add transaction'));
       await tester.pumpAndSettle();
       await tester.tap(find.byType(DropdownButtonFormField<AccountKind>));
@@ -455,7 +506,7 @@ void main() {
         'Monthly rent',
       );
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Amount (EUR)'),
+        find.widgetWithText(TextFormField, 'Amount (€)'),
         '10',
       );
       await tester.tap(find.byType(DropdownButtonFormField<String>));
@@ -488,7 +539,7 @@ void main() {
       await tester.tap(find.text('Monthly rent').first);
       await tester.pumpAndSettle();
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Amount (EUR)'),
+        find.widgetWithText(TextFormField, 'Amount (€)'),
         '12',
       );
       await tester.tap(find.text('Save recurring payment'));
@@ -546,7 +597,7 @@ void main() {
         'Debit bank',
       );
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Current balance (EUR)'),
+        find.widgetWithText(TextFormField, 'Current balance (€)'),
         '20',
       );
       await tester.tap(find.widgetWithText(SwitchListTile, 'Allow overdraft'));
@@ -610,7 +661,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(store.accounts, isEmpty);
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'Cash balance (EUR)'),
+      find.widgetWithText(TextFormField, 'Cash balance (€)'),
       '50',
     );
     await tester.tap(find.text('Continue'));
@@ -620,7 +671,7 @@ void main() {
       'My bank',
     );
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'Bank balance (EUR)'),
+      find.widgetWithText(TextFormField, 'Bank balance (€)'),
       '-10',
     );
     await tester.tap(find.widgetWithText(SwitchListTile, 'Allow overdraft'));
@@ -751,10 +802,10 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(MyApp(store: store));
       await tester.pumpAndSettle();
-      expect(find.textContaining('No transactions'), findsOneWidget);
+      expect(find.textContaining('No expenses or refunds'), findsOneWidget);
       await tester.tap(find.byTooltip('Add transaction'));
       await tester.pumpAndSettle();
-      expect(find.text('Currency: EUR (€)'), findsOneWidget);
+      expect(find.text('Currency: €'), findsOneWidget);
       expect(find.byType(DropdownButtonFormField<Currency>), findsNothing);
       expect(find.textContaining('IQD'), findsNothing);
       await tester.tap(find.text('Save transaction'));
@@ -794,7 +845,7 @@ void main() {
       );
       await tester.tap(find.text('Overview'));
       await tester.pumpAndSettle();
-      expect(find.text('Spending after refunds: 12.34'), findsOneWidget);
+      expect(find.text('Spending after refunds: €12.34'), findsOneWidget);
       await tester.tap(find.text('Home'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Groceries'));

@@ -152,7 +152,7 @@ class _SetupScreenState extends State<SetupScreen> {
                         TextFormField(
                           controller: cash,
                           decoration: const InputDecoration(
-                            labelText: 'Cash balance (EUR)',
+                            labelText: 'Cash balance (€)',
                           ),
                           keyboardType: const TextInputType.numberWithOptions(
                             decimal: true,
@@ -195,7 +195,7 @@ class _SetupScreenState extends State<SetupScreen> {
                         ListTile(
                           title: Text(account.name),
                           subtitle: Text(
-                            'Existing account kept · EUR ${Currency.eur.format(accountBalance(account, widget.store.entries, DateTime.now()))}',
+                            'Existing account kept · €${Currency.eur.format(accountBalance(account, widget.store.entries, DateTime.now()))}',
                           ),
                         ),
                       if (!hasBank)
@@ -225,7 +225,7 @@ class _SetupScreenState extends State<SetupScreen> {
                                   TextFormField(
                                     controller: banks[i].balance,
                                     decoration: const InputDecoration(
-                                      labelText: 'Bank balance (EUR)',
+                                      labelText: 'Bank balance (€)',
                                     ),
                                     keyboardType:
                                         const TextInputType.numberWithOptions(
@@ -281,14 +281,14 @@ class _SetupScreenState extends State<SetupScreen> {
                   ListTile(
                     title: const Text('Cash'),
                     trailing: Text(
-                      'EUR ${Currency.eur.format(Currency.eur.parse(cash.text))}',
+                      '€${Currency.eur.format(Currency.eur.parse(cash.text))}',
                     ),
                   ),
                 for (final account in widget.store.accounts)
                   ListTile(
                     title: Text('${account.name} (kept)'),
                     trailing: Text(
-                      'EUR ${Currency.eur.format(accountBalance(account, widget.store.entries, DateTime.now()))}',
+                      '€${Currency.eur.format(accountBalance(account, widget.store.entries, DateTime.now()))}',
                     ),
                   ),
                 if (!noBank)
@@ -296,7 +296,7 @@ class _SetupScreenState extends State<SetupScreen> {
                     ListTile(
                       title: Text(bank.name.text.trim()),
                       trailing: Text(
-                        'EUR ${Currency.eur.format(bankAmount(bank.balance.text))}',
+                        '€${Currency.eur.format(bankAmount(bank.balance.text))}',
                       ),
                     ),
                 const Text(

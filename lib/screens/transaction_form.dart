@@ -30,6 +30,8 @@ class _TransactionFormState extends State<TransactionForm> {
   bool saving = false;
   String? error;
   Future<Map<String, Object?>?>? scannedInvoice;
+  bool get originallyUnassigned =>
+      widget.entry?.id != null && widget.entry?.accountId == null;
   @override
   void initState() {
     super.initState();
@@ -201,7 +203,9 @@ class _TransactionFormState extends State<TransactionForm> {
             }
           }),
     validator: (id) =>
-        ((type == EntryType.expense || type == EntryType.income) && id == null)
+        ((type == EntryType.expense || type == EntryType.income) &&
+            id == null &&
+            !originallyUnassigned)
         ? (type == EntryType.income
               ? 'Select where this income is received.'
               : 'Select the account used for this payment.')
@@ -327,7 +331,7 @@ class _TransactionFormState extends State<TransactionForm> {
                     ? 'Enter a description.'
                     : null,
               ),
-              const Text('Currency: EUR (€)'),
+              const Text('Currency: €'),
               TextFormField(
                 controller: amount,
                 enabled: !saving,
@@ -408,17 +412,29 @@ class _TransactionFormState extends State<TransactionForm> {
                       value == null ? 'Select a category.' : null,
                 ),
               if (type == EntryType.expense) ...[
+                if (originallyUnassigned)
+                  const Text(
+                    'This historical expense has no assigned account. It counts in spending without changing account balances.',
+                  ),
                 DropdownButtonFormField<AccountKind>(
                   initialValue: paymentMethod,
+                  hint: originallyUnassigned
+                      ? const Text('Unknown (unassigned)')
+                      : null,
                   decoration: const InputDecoration(
                     labelText: 'Payment method',
                   ),
-                  items: const [
-                    DropdownMenuItem(
+                  items: [
+                    if (originallyUnassigned)
+                      const DropdownMenuItem<AccountKind>(
+                        value: null,
+                        child: Text('Unknown (unassigned)'),
+                      ),
+                    const DropdownMenuItem(
                       value: AccountKind.cash,
                       child: Text('Cash'),
                     ),
-                    DropdownMenuItem(
+                    const DropdownMenuItem(
                       value: AccountKind.bank,
                       child: Text('Bank'),
                     ),
@@ -435,13 +451,14 @@ class _TransactionFormState extends State<TransactionForm> {
                               ? choices.single.id
                               : null;
                         }),
-                  validator: (value) =>
-                      value == null ? 'Choose cash or bank.' : null,
+                  validator: (value) => value == null && !originallyUnassigned
+                      ? 'Choose cash or bank.'
+                      : null,
                 ),
                 if (paymentMethod != null) accountField(false),
                 if (accountId != null)
                   Text(
-                    'Available balance: EUR ${Currency.eur.format(accountBalance(widget.store.accounts.singleWhere((a) => a.id == accountId), widget.store.entries, DateTime.now()))}. ${widget.store.accounts.singleWhere((a) => a.id == accountId).canOverdraw ? 'Overdraft allowed.' : 'Insufficient funds will be rejected.'}',
+                    'Available balance: €${Currency.eur.format(accountBalance(widget.store.accounts.singleWhere((a) => a.id == accountId), widget.store.entries, DateTime.now()))}. ${widget.store.accounts.singleWhere((a) => a.id == accountId).canOverdraw ? 'Overdraft allowed.' : 'Insufficient funds will be rejected.'}',
                   ),
               ] else
                 accountField(false),

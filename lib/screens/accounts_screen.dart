@@ -49,7 +49,7 @@ class AccountsScreen extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'EUR ${a.currency.format(accountBalance(a, store.entries, DateTime.now()))}',
+                      '€${a.currency.format(accountBalance(a, store.entries, DateTime.now()))}',
                     ),
                     const SizedBox(width: 8),
                     const Icon(Icons.edit_outlined),
@@ -182,7 +182,7 @@ class _AccountFormState extends State<AccountForm> {
               validator: (s) =>
                   s == null || s.trim().isEmpty ? 'Enter a name.' : null,
             ),
-            const Text('Currency: EUR'),
+            const Text('Currency: €'),
             DropdownButtonFormField<AccountKind>(
               initialValue: kind,
               decoration: const InputDecoration(labelText: 'Account type'),
@@ -215,8 +215,8 @@ class _AccountFormState extends State<AccountForm> {
               enabled: !busy,
               decoration: InputDecoration(
                 labelText: editing
-                    ? 'Current balance (EUR)'
-                    : 'Starting balance (EUR)',
+                    ? 'Current balance (€)'
+                    : 'Starting balance (€)',
               ),
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
