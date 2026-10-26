@@ -3,9 +3,11 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/gestures.dart';
 
 import '../core/data/ledger_store.dart';
 import '../core/domain/ledger.dart';
+import '../core/domain/number_format.dart';
 import '../core/presentation/ledger_refresh.dart';
 import '../core/presentation/main_drawer.dart';
 import '../core/presentation/transaction_tile.dart';
@@ -36,6 +38,7 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   final PageController _pageController = PageController();
+  Drag? _homeEdgeDrag;
   final _addButtonKey = GlobalKey();
   Timer? _exitTimer;
   bool _checkingRecurring = false;
@@ -61,6 +64,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     _exitTimer?.cancel();
+    _homeEdgeDrag?.cancel();
     _pageController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -301,7 +305,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       );
       if (updated && mounted) {
         setState(_selectedIds.clear);
-        _showMessage('${ids.length} transactions updated.');
+        _showMessage('${formatInteger(ids.length)} transactions updated.');
       }
     } on ArgumentError catch (error) {
       if (mounted) _showMessage('${error.message}');
@@ -363,7 +367,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             actions: _selectedIds.isNotEmpty ? _selectionActions() : null,
             title: Text(
               _selectedIds.isNotEmpty
-                  ? '${_selectedIds.length} selected'
+                  ? '${formatInteger(_selectedIds.length)} selected'
                   : _showTransactions
                   ? 'All transactions'
                   : _navigationIndex == 1
@@ -438,6 +442,22 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                               month: _month,
                               summary: summary,
                               tab: _homeTab,
+                              onOverviewDragStart: (details) {
+                                _homeEdgeDrag?.cancel();
+                                _exitTimer?.cancel();
+                                _swipeStartPage = 0;
+                                _homeEdgeDrag = _pageController.position.drag(
+                                  details,
+                                  () => _homeEdgeDrag = null,
+                                );
+                              },
+                              onOverviewDragUpdate: (details) =>
+                                  _homeEdgeDrag?.update(details),
+                              onOverviewDragEnd: (details) {
+                                final drag = _homeEdgeDrag;
+                                _homeEdgeDrag = null;
+                                drag?.end(details);
+                              },
                               selectedCategory: _homeCategory,
                               onCategoryChanged: (category) => setState(() {
                                 _homeCategory = category;
@@ -501,6 +521,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               : NavigationBar(
                   selectedIndex: _navigationIndex,
                   onDestinationSelected: (index) {
+                    _homeEdgeDrag?.cancel();
+                    _homeEdgeDrag = null;
                     _exitTimer?.cancel();
                     _pageController.jumpToPage(index);
                     setState(() {

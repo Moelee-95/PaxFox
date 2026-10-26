@@ -35,7 +35,7 @@ class TransactionCsv {
           '${e.date.day}.${e.date.month}.${e.date.year >= 2000 && e.date.year <= 2099 ? (e.date.year % 100).toString().padLeft(2, '0') : e.date.year.toString().padLeft(4, '0')}',
           e.description,
           e.category,
-          e.currency.display(e.amount),
+          '${e.currency.symbol}${e.currency.format(e.amount)}',
           e.notes,
         ],
     ]);

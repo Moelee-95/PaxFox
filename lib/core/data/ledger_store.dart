@@ -19,6 +19,7 @@ class LedgerStore extends ChangeNotifier {
   List<LedgerEntry> get entries => _ledger.entries;
   List<Account> _accounts = const [];
   List<Account> get accounts => _accounts;
+  Set<int> _deletableBankIds = const {};
   Set<int> _receiptTransactionIds = const {};
   Set<int> get receiptTransactionIds => _receiptTransactionIds;
   List<LedgerCategory> _categories = const [];
@@ -153,7 +154,14 @@ class LedgerStore extends ChangeNotifier {
         whereArgs: [activeCurrency.name],
         orderBy: 'name',
       )).map(Account.fromMap).toList();
+      final deletableBankIds = (await txn.rawQuery(
+        "SELECT a.id FROM accounts a WHERE a.kind = 'bank' "
+        'AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.account_id = a.id OR t.destination_id = a.id) '
+        'AND NOT EXISTS (SELECT 1 FROM recurring_rules r WHERE r.account_id = a.id) '
+        'AND NOT EXISTS (SELECT 1 FROM recurring_occurrences o WHERE o.account_id = a.id)',
+      )).map((row) => row['id'] as int).toSet();
       return (
+        deletableBankIds: deletableBankIds,
         currency: activeCurrency,
         debts: debtList,
         timeout: timeout,
@@ -186,6 +194,7 @@ class LedgerStore extends ChangeNotifier {
     hasLegacyCurrencyData = snapshot.legacy;
     _ledger = LedgerIndex(snapshot.entries);
     _accounts = List.unmodifiable(snapshot.accounts);
+    _deletableBankIds = Set.unmodifiable(snapshot.deletableBankIds);
     _balances = null;
     notifyListeners();
   }
@@ -556,6 +565,53 @@ class LedgerStore extends ChangeNotifier {
   Future<void> addAccount(Account account) async {
     _validateAccount(account);
     await db.insert('accounts', account.toMap());
+    await refresh();
+  }
+
+  static Future<bool> _canDeleteBankAccount(
+    DatabaseExecutor txn,
+    int id,
+  ) async {
+    final account = await txn.query(
+      'accounts',
+      where: "id = ? AND kind = 'bank'",
+      whereArgs: [id],
+    );
+    if (account.isEmpty) return false;
+    final transactions = await txn.query(
+      'transactions',
+      columns: ['id'],
+      where: 'account_id = ? OR destination_id = ?',
+      whereArgs: [id, id],
+      limit: 1,
+    );
+    if (transactions.isNotEmpty) return false;
+    for (final table in ['recurring_rules', 'recurring_occurrences']) {
+      if ((await txn.query(
+        table,
+        columns: ['id'],
+        where: 'account_id = ?',
+        whereArgs: [id],
+        limit: 1,
+      )).isNotEmpty) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool canDeleteBankAccount(int id) => _deletableBankIds.contains(id);
+
+  Future<void> deleteBankAccount(int id) async {
+    await db.transaction((txn) async {
+      // Recheck atomically: an editor's earlier eligibility result may be stale.
+      if (!await _canDeleteBankAccount(txn, id)) {
+        throw ArgumentError(
+          'Only bank accounts without transactions or recurring payment links can be deleted.',
+        );
+      }
+      await txn.delete('accounts', where: 'id = ?', whereArgs: [id]);
+    });
     await refresh();
   }
 

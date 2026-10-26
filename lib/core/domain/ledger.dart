@@ -1,3 +1,5 @@
+import 'number_format.dart';
+
 enum EntryType { expense, income, refund, transfer }
 
 enum Currency {
@@ -14,7 +16,14 @@ enum Currency {
     Currency.gbp => '\u00a3',
     Currency.iqd => 'IQD ',
   };
-  String display(int minor) => '$symbol${format(minor)}';
+  String display(int minor) => '$symbol${formatGrouped(minor)}';
+
+  String formatGrouped(int minor) {
+    final parts = format(minor).split('.');
+    return '${groupDigits(parts[0])}.${parts[1]}';
+  }
+
+  int parseInput(String input) => parse(normalizeAmountInput(input));
   final int exponent;
   int get scale => exponent == 2 ? 100 : 1000;
   static final _amountPattern = RegExp(r'^(\d+)(?:[.,](\d+))?$');

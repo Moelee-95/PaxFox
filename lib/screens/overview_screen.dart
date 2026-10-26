@@ -45,7 +45,7 @@ class OverviewScreen extends StatelessWidget {
             icon: Icons.account_balance_wallet_outlined,
             color: colors.primary,
             detail:
-                'Excludes blocked accounts: ${store.currency.symbol}${store.currency.format(blocked)}',
+                'Excludes blocked accounts: ${store.currency.symbol}${store.currency.formatGrouped(blocked)}',
           ),
         ),
         if (store.hasLegacyCurrencyData)
@@ -156,7 +156,7 @@ class OverviewScreen extends StatelessWidget {
 
   Future<void> _editDebt(BuildContext context, Debt debt) => showDialog<void>(
     context: context,
-    barrierDismissible: false,
+    barrierDismissible: true,
     builder: (_) => DebtEditor(
       currency: store.currency,
       debt: debt,

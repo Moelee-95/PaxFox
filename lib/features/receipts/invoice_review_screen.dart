@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../../core/presentation/grouped_amount_formatter.dart';
+
 import '../../core/data/ledger_store.dart';
 import '../../core/domain/ledger.dart';
 import '../../core/presentation/account_picker.dart';
@@ -489,7 +491,7 @@ class _InvoiceItemDialogState extends State<InvoiceItemDialog> {
       price = TextEditingController(
         text: widget.item?.total == null
             ? ''
-            : widget.currency.format(widget.item!.total!),
+            : widget.currency.formatGrouped(widget.item!.total!),
       );
   late String? category = widget.item?.category;
   late DateTime? date = widget.item?.date ?? widget.initialDate;
@@ -502,7 +504,7 @@ class _InvoiceItemDialogState extends State<InvoiceItemDialog> {
 
   int signed(String value) {
     final text = value.trim();
-    return widget.currency.parse(text.replaceFirst(RegExp(r'^-'), '')) *
+    return widget.currency.parseInput(text.replaceFirst(RegExp(r'^-'), '')) *
         (text.startsWith('-') ? -1 : 1);
   }
 
@@ -524,6 +526,7 @@ class _InvoiceItemDialogState extends State<InvoiceItemDialog> {
             const SizedBox(height: 16),
             TextFormField(
               controller: price,
+              inputFormatters: const [GroupedAmountFormatter()],
               decoration: InputDecoration(
                 labelText: 'Price (${widget.currency.symbol.trim()})',
               ),

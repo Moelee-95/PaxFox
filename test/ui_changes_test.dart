@@ -54,6 +54,7 @@ void main() {
 
   Future<void> preview(WidgetTester tester, String name) async {
     if (!const bool.fromEnvironment('CAPTURE_UI')) return;
+    await tester.pumpAndSettle();
     await tester.runAsync(() async {
       final boundary =
           previewKey.currentContext!.findRenderObject()
@@ -131,6 +132,7 @@ void main() {
       await tester.tap(find.widgetWithText(ListTile, 'Accounts'));
       await tester.pumpAndSettle();
       expect(find.text('Family loan'), findsOneWidget);
+      await preview(tester, 'accounts-management');
       await tester.pageBack();
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Add transaction'));
@@ -145,6 +147,31 @@ void main() {
       );
       expect(find.byType(DropdownButtonFormField<EntryType>), findsNothing);
       await preview(tester, 'manual-inputs');
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Open menu'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ListTile, 'Recurring payments'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Add recurring payment'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Income').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Description (e.g. Rent)'),
+        'Monthly salary',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Amount (IQD)'),
+        '2400',
+      );
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Salary').last);
+      await tester.pumpAndSettle();
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+      await preview(tester, 'recurring-compact-form');
       expect(tester.takeException(), isNull);
     },
   );

@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../core/presentation/grouped_amount_formatter.dart';
+
 import '../core/data/ledger_store.dart';
 import '../core/domain/ledger.dart';
 import '../core/presentation/ledger_refresh.dart';
 import '../core/presentation/debt_editor.dart';
 import '../core/presentation/info_button.dart';
+import '../core/presentation/confirmation_dialog.dart';
 
 class AccountsScreen extends StatelessWidget {
   const AccountsScreen({super.key, required this.store});
@@ -17,7 +20,7 @@ class AccountsScreen extends StatelessWidget {
   );
   Future<void> editDebt(BuildContext context, [Debt? debt]) => showDialog<void>(
     context: context,
-    barrierDismissible: false,
+    barrierDismissible: true,
     builder: (_) => DebtEditor(
       currency: store.currency,
       debt: debt,
@@ -36,19 +39,19 @@ class AccountsScreen extends StatelessWidget {
         ),
       ],
     ),
-    floatingActionButton: FloatingActionButton.extended(
-      onPressed: () => edit(context),
-      icon: const Icon(Icons.add),
-      label: const Text('Add account'),
-    ),
     body: LedgerRefresh(
       store: store,
       child: ListenableBuilder(
         listenable: store,
         builder: (_, _) => ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
           children: [
+            Text(
+              'Bank accounts & cash',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
             if (store.accounts.isEmpty)
               const Padding(
                 padding: EdgeInsets.all(24),
@@ -59,18 +62,41 @@ class AccountsScreen extends StatelessWidget {
                 child: ListTile(
                   onTap: () => edit(context, a),
                   title: Text(a.name),
-                  subtitle: Text(
-                    '${a.kind == AccountKind.cash ? 'Cash' : 'Bank'} - ${!a.available
-                        ? 'Blocked - included in wealth'
-                        : a.canOverdraw
-                        ? 'Overdraft allowed'
-                        : 'Cannot go below zero'}',
+                  leading: Icon(
+                    a.kind == AccountKind.cash
+                        ? Icons.payments_outlined
+                        : Icons.account_balance_outlined,
+                  ),
+                  subtitle: Wrap(
+                    spacing: 4,
+                    children: [
+                      _policyIcon(
+                        context,
+                        a.canOverdraw
+                            ? Icons.credit_score_outlined
+                            : Icons.shield_outlined,
+                        a.canOverdraw
+                            ? 'Overdraft allowed'
+                            : 'Cannot go below zero',
+                      ),
+                      if (!a.available)
+                        _policyIcon(
+                          context,
+                          Icons.lock_outline,
+                          'Blocked account: cannot fund spending or outgoing transfers',
+                        ),
+                      _policyIcon(
+                        context,
+                        Icons.account_balance_wallet_outlined,
+                        'Included in account wealth',
+                      ),
+                    ],
                   ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        '${a.currency.symbol}${a.currency.format(store.currentBalances.byAccount[a.id] ?? a.opening)}',
+                        '${a.currency.symbol}${a.currency.formatGrouped(store.currentBalances.byAccount[a.id] ?? a.opening)}',
                       ),
                       const SizedBox(width: 8),
                       const Icon(Icons.edit_outlined),
@@ -78,6 +104,11 @@ class AccountsScreen extends StatelessWidget {
                   ),
                 ),
               ),
+            OutlinedButton.icon(
+              onPressed: () => edit(context),
+              icon: const Icon(Icons.add),
+              label: const Text('Add account'),
+            ),
             const SizedBox(height: 24),
             Text('Debts', style: Theme.of(context).textTheme.titleLarge),
             Text(
@@ -103,6 +134,26 @@ class AccountsScreen extends StatelessWidget {
       ),
     ),
   );
+  Widget _policyIcon(BuildContext context, IconData icon, String message) =>
+      IconButton(
+        tooltip: message,
+        visualDensity: VisualDensity.compact,
+        iconSize: 20,
+        icon: Icon(icon),
+        onPressed: () => showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Account information'),
+            content: Text(message),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+        ),
+      );
 }
 
 class AccountForm extends StatefulWidget {
@@ -130,7 +181,7 @@ class _AccountFormState extends State<AccountForm> {
     balance = TextEditingController(
       text: a == null
           ? '0'
-          : widget.store.currency.format(
+          : widget.store.currency.formatGrouped(
               widget.store.currentBalances.byAccount[a.id] ?? a.opening,
             ),
     );
@@ -149,7 +200,9 @@ class _AccountFormState extends State<AccountForm> {
 
   int amount() {
     final input = balance.text.trim();
-    return widget.store.currency.parse(input.replaceFirst(RegExp(r'^-'), '')) *
+    return widget.store.currency.parseInput(
+          input.replaceFirst(RegExp(r'^-'), ''),
+        ) *
         (input.startsWith('-') ? -1 : 1);
   }
 
@@ -207,14 +260,47 @@ class _AccountFormState extends State<AccountForm> {
     }
   }
 
+  Future<void> delete() async {
+    final yes = await confirmAction(
+      context,
+      title: 'Delete bank account?',
+      message: 'This removes the unused bank account and its starting balance.',
+    );
+    if (yes != true || !mounted) return;
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      await widget.store.deleteBankAccount(widget.account!.id!);
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          busy = false;
+          error = e is ArgumentError
+              ? '${e.message}'
+              : 'Could not delete account. Please retry.';
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: !busy,
     child: Scaffold(
       appBar: AppBar(
         title: Text(editing ? 'Edit account' : 'Add account'),
-        actions: const [
-          InfoButton(
+        actions: [
+          if (widget.account?.id != null &&
+              widget.store.canDeleteBankAccount(widget.account!.id!))
+            IconButton(
+              tooltip: 'Delete bank account',
+              onPressed: busy ? null : delete,
+              icon: const Icon(Icons.delete_outline),
+            ),
+          const InfoButton(
             title: 'Account settings',
             message: 'Balance corrections adjust the starting balance while keeping existing payments and the original starting date. Historical balances also change; corrections creating a negative protected balance are rejected. For new accounts enter the balance before payments recorded on the starting date. Cash cannot go below zero. Banks require overdraft permission to go below zero. Blocked accounts count toward wealth and can receive money but cannot fund spending or outgoing transfers.',
           ),
@@ -261,6 +347,7 @@ class _AccountFormState extends State<AccountForm> {
             const SizedBox(height: 16),
             TextFormField(
               controller: balance,
+              inputFormatters: const [GroupedAmountFormatter()],
               enabled: !busy,
               decoration: InputDecoration(
                 labelText: editing

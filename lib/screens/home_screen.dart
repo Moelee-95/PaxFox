@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/domain/ledger.dart';
+import '../core/domain/number_format.dart';
 import '../core/domain/ledger_queries.dart';
 import '../core/presentation/month_selector.dart';
 import 'monthly_overview.dart';
@@ -19,12 +20,18 @@ class HomeScreen extends StatefulWidget {
     required this.tileBuilder,
     this.selectedCategory,
     required this.onCategoryChanged,
+    this.onOverviewDragStart,
+    this.onOverviewDragUpdate,
+    this.onOverviewDragEnd,
   });
 
   static IconData _defaultCategoryIcon(String _) => Icons.category_outlined;
   final IconData Function(String) categoryIcon;
   final String? selectedCategory;
   final ValueChanged<String?> onCategoryChanged;
+  final GestureDragStartCallback? onOverviewDragStart;
+  final GestureDragUpdateCallback? onOverviewDragUpdate;
+  final GestureDragEndCallback? onOverviewDragEnd;
   final DateTime month;
   final Currency currency;
   final MonthlyLedger summary;
@@ -41,6 +48,55 @@ class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs;
   late int _tab;
+  bool _startedOnInfo = false;
+  bool _forwardingDrag = false;
+
+  bool _handleTabScroll(ScrollNotification notification) {
+    if (notification.depth != 0 ||
+        notification.metrics.axis != Axis.horizontal) {
+      return false;
+    }
+    if (notification is ScrollStartNotification &&
+        notification.dragDetails != null) {
+      _startedOnInfo = _tabs.index == 2 && !_tabs.indexIsChanging;
+    } else if (notification is OverscrollNotification &&
+        _startedOnInfo &&
+        widget.onOverviewDragStart != null &&
+        notification.dragDetails != null &&
+        (_forwardingDrag || notification.overscroll > 0)) {
+      final details = notification.dragDetails!;
+      if (!_forwardingDrag) {
+        _forwardingDrag = true;
+        widget.onOverviewDragStart!(
+          DragStartDetails(
+            globalPosition: details.globalPosition - details.delta,
+            localPosition: details.localPosition - details.delta,
+            sourceTimeStamp: details.sourceTimeStamp,
+          ),
+        );
+      }
+      // Only forward the distance rejected by the inner pager at its edge.
+      widget.onOverviewDragUpdate?.call(
+        DragUpdateDetails(
+          globalPosition: details.globalPosition,
+          localPosition: details.localPosition,
+          delta: Offset(-notification.overscroll, 0),
+          primaryDelta: -notification.overscroll,
+          sourceTimeStamp: details.sourceTimeStamp,
+        ),
+      );
+    } else if (notification is ScrollEndNotification) {
+      if (_forwardingDrag) {
+        _forwardingDrag = false;
+        widget.onOverviewDragEnd?.call(
+          notification.dragDetails ?? DragEndDetails(),
+        );
+      }
+      _startedOnInfo = false;
+    }
+    return false;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -153,7 +209,7 @@ class _HomeScreenState extends State<HomeScreen>
                                   ),
                                   const SizedBox(width: 6),
                                   Text(
-                                    '${widget.currency.symbol}${tab.amount ~/ widget.currency.scale}',
+                                    '${widget.currency.symbol}${formatInteger(tab.amount ~/ widget.currency.scale)}',
                                     style: TextStyle(
                                       fontWeight: FontWeight.w700,
                                       color: tab.color,
@@ -185,31 +241,50 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
         Expanded(
-          child: TabBarView(
-            controller: _tabs,
-            children: [
-              list(
-                'expenses',
-                spending,
-                'No expenses or refunds in this month. Tap + to add one.',
-              ),
-              list(
-                'income',
-                income,
-                'No income in this month. Tap + to add one.',
-              ),
-              MonthlyOverview(
-                summary: widget.summary,
-                currency: widget.currency,
-                categoryIcon: widget.categoryIcon,
-                selectedCategory: widget.selectedCategory,
-                onCategoryChanged: widget.onCategoryChanged,
-                tileBuilder: widget.tileBuilder,
-              ),
-            ],
+          child: NotificationListener<ScrollNotification>(
+            onNotification: _handleTabScroll,
+            child: TabBarView(
+              physics: _HomeTabPhysics(lockAtEdge: () => _forwardingDrag),
+              controller: _tabs,
+              children: [
+                list(
+                  'expenses',
+                  spending,
+                  'No expenses or refunds in this month. Tap + to add one.',
+                ),
+                list(
+                  'income',
+                  income,
+                  'No income in this month. Tap + to add one.',
+                ),
+                MonthlyOverview(
+                  summary: widget.summary,
+                  currency: widget.currency,
+                  categoryIcon: widget.categoryIcon,
+                  selectedCategory: widget.selectedCategory,
+                  onCategoryChanged: widget.onCategoryChanged,
+                  tileBuilder: widget.tileBuilder,
+                ),
+              ],
+            ),
           ),
         ),
       ],
     );
   }
+}
+
+// Clamp the inner pager so its rejected distance can move the main pager.
+// Once handed off, keep the info page fixed even if the finger reverses.
+class _HomeTabPhysics extends ClampingScrollPhysics {
+  const _HomeTabPhysics({required this.lockAtEdge, super.parent});
+  final bool Function() lockAtEdge;
+  @override
+  _HomeTabPhysics applyTo(ScrollPhysics? ancestor) =>
+      _HomeTabPhysics(lockAtEdge: lockAtEdge, parent: buildParent(ancestor));
+  @override
+  double applyBoundaryConditions(ScrollMetrics position, double value) =>
+      lockAtEdge()
+      ? value - position.pixels
+      : super.applyBoundaryConditions(position, value);
 }

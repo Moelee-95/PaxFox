@@ -339,7 +339,7 @@ void main() {
         ),
         2000,
       );
-      await tester.tap(find.text('Pause'));
+      await tester.tap(find.byTooltip('Pause'));
       await tester.runAsync(() async {
         await Future<void>.delayed(const Duration(milliseconds: 100));
       });
@@ -607,13 +607,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(store.recurringRules, hasLength(1));
       expect(store.entries.single.amount, 1000);
-      await tester.tap(find.text('Pause'));
+      await tester.tap(find.byTooltip('Pause'));
       await tester.runAsync(() async {
         await Future<void>.delayed(const Duration(milliseconds: 100));
       });
       await tester.pumpAndSettle();
       expect(store.recurringRules.single.active, isFalse);
-      await tester.tap(find.text('Resume'));
+      await tester.tap(find.byTooltip('Resume'));
       await tester.runAsync(() async {
         await Future<void>.delayed(const Duration(milliseconds: 100));
       });
@@ -632,7 +632,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(store.recurringRules.single.amount, 1200);
       expect(store.entries.single.amount, 1000);
-      await tester.tap(find.text('Delete'));
+      await tester.tap(find.byTooltip('Delete recurring rule'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Delete').last);
       await tester.runAsync(() async {

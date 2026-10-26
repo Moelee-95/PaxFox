@@ -12,14 +12,14 @@ Flutter/Dart Material 3 personal finance app, one setup currency (EUR/USD/GBP/IQ
 Startup -> open/migrate storage -> failure/retry OR required first-run setup
 Setup: currency + cash -> banks/no-bank -> review + optional debts -> main shell
 Main bottom tabs: Home | Overview | Cashflow (Back twice within 2 seconds to exit)
-  Home: month pager + three tabs: Expenses/refunds | Income | compact info icon (Monthly overview); header amounts omit fractional units; normal tab taps and horizontal swipes
+  Home: month pager + three tabs: Expenses/refunds | Income | compact info icon (Monthly overview); header amounts omit fractional units; normal tab taps and horizontal swipes; swipe left from the info tab to continue to main Overview
   Monthly overview category cards -> inline matching expenses/refunds + back button, editing and bulk selection
   Overview: prominent wealth/spendable totals + compact editable account cards + compact highlighted debts
   Cashflow: empty placeholder for future functionality
   Transactions: all-date search + type filter
 Main drawer: Home, All transactions, Categories, Accounts, Settings, CSV, Recurring
   All transactions replaces content; Back restores the prior main tab
-  Accounts -> AccountForm; Categories -> edit dialog + searchable Material icon picker
+  Accounts -> AccountForm (unused banks can be deleted); Categories -> edit dialog + searchable Material icon picker
   Recurring -> RecurringForm; unpaid history -> retry/skip
 Floating + -> white modal backdrop + Add manually / Scan invoice / From gallery / close
   Manual -> TransactionForm
@@ -34,6 +34,7 @@ Long-press entries -> bulk category/account/delete actions
 - `lib/main.dart` owns startup/theme. `screens/main_screen.dart` owns navigation, lifecycle checks and selection. Navigation uses `MaterialPageRoute`, not named URLs.
 - `core/data/ledger_store.dart` is the injected `ChangeNotifier`, public data/write boundary. Forms call store methods; committed changes publish a complete read-only collection snapshot through `refresh()`.
 - `core/data/ledger_database.dart` owns schema/migrations; `core/domain/` owns money and schedules. UI components live in `core/presentation/`; invoice code in `features/receipts/`.
+- UI amounts use comma thousands grouping (1,234.56), including editable money fields; CSV/extraction serialization stays ungrouped.
 - Money is **integer minor units** (2 decimals for EUR/USD/GBP, 3 for IQD), never floating-point. Transactions store positive magnitudes; type determines sign. Refunds reduce spending; transfers affect accounts only. New writes use the setup currency; other-currency rows remain stored and excluded. Upgrades default to EUR without relabeling old amounts.
 - Balances derive from opening balance + eligible transactions. Cash cannot overdraw; banks require their own overdraft permission. Blocked accounts can receive funds but cannot fund expenses/outgoing transfers. Preserve historical/future balance validation and atomic rollback.
 - Transaction date and UTC creation timestamp are separate; edits preserve creation time. Account opening-date inclusion has legacy semantics that must survive migration.
@@ -58,6 +59,6 @@ flutter test
 flutter build apk --debug
 ```
 
-Validation on 2026-10-26 after compact cards, cleaner guidance, aligned inputs and double-back exit: **135 passing tests**, clean analyzer, successful debug APK build and checked phone-sized layouts. The previous release build verified icon tree-shaking (20,168-byte font). Do not assume iOS/device camera/release publishing was verified. No full backup/restore, web support, bank integration or cloud sync exists.
+Validation on 2026-10-26 after app-wide thousands separators: **147 passing tests**, clean analyzer, successful debug APK build and checked phone-sized layouts. Do not assume iOS/device camera/release publishing was verified. No full backup/restore, web support, bank integration or cloud sync exists.
 
 Suggested future prompt: **“Read AI_CONTEXT.md first. Use its linked maps only as needed, inspect the files relevant to my request, and preserve the documented financial invariants.”**

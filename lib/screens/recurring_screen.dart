@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/presentation/grouped_amount_formatter.dart';
+
 import '../core/presentation/entry_type_picker.dart';
 
 import '../core/data/ledger_store.dart';
@@ -8,6 +10,8 @@ import '../core/domain/recurring.dart';
 import '../core/presentation/confirmation_dialog.dart';
 import '../core/presentation/info_button.dart';
 import '../core/presentation/ledger_refresh.dart';
+import '../core/presentation/responsive_pair.dart';
+import '../core/presentation/bottom_action_bar.dart';
 
 const _recurringInfo =
     'Monthly expenses and income are posted automatically when you open or resume Moneva. Missed due dates are caught up. No bank connection: this updates your local ledger, not your real bank. Days 29-31 use the last day in shorter months. No weekend adjustment.';
@@ -125,8 +129,19 @@ class _RecurringScreenState extends State<RecurringScreen> {
                             ? Colors.green
                             : Colors.red,
                       ),
-                      subtitle: Text(
-                        '${rule.type == EntryType.income ? 'Income' : 'Expense'} - ${widget.store.currency.symbol}${widget.store.currency.format(rule.amount)} - ${widget.store.accounts.where((a) => a.id == rule.accountId).firstOrNull?.name ?? 'Account unavailable'}\n${rule.active ? 'Next' : 'Paused; scheduled'}: ${dayKey(rule.nextDate)} - every ${rule.interval} month(s), day ${rule.day}',
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${rule.type == EntryType.income ? 'Income' : 'Expense'} - ${widget.store.currency.display(rule.amount)} - ${widget.store.accounts.where((a) => a.id == rule.accountId).firstOrNull?.name ?? 'Account unavailable'}',
+                          ),
+                          Text(
+                            '${rule.active ? 'Next' : 'Paused; scheduled'}: ${dayKey(rule.nextDate)} - every ${rule.interval} month(s), day ${rule.day}',
+                            style: TextStyle(
+                              color: rule.active ? Colors.blue : Colors.orange,
+                            ),
+                          ),
+                        ],
                       ),
                       isThreeLine: true,
                       trailing: const Icon(Icons.edit_outlined),
@@ -134,7 +149,8 @@ class _RecurringScreenState extends State<RecurringScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        TextButton(
+                        IconButton(
+                          tooltip: rule.active ? 'Pause' : 'Resume',
                           onPressed: busy
                               ? null
                               : () => action(
@@ -143,11 +159,16 @@ class _RecurringScreenState extends State<RecurringScreen> {
                                     !rule.active,
                                   ),
                                 ),
-                          child: Text(rule.active ? 'Pause' : 'Resume'),
+                          icon: Icon(
+                            rule.active
+                                ? Icons.pause_outlined
+                                : Icons.play_arrow_outlined,
+                          ),
                         ),
-                        TextButton(
+                        IconButton(
+                          tooltip: 'Delete recurring rule',
                           onPressed: busy ? null : () => remove(rule),
-                          child: const Text('Delete'),
+                          icon: const Icon(Icons.delete_outline),
                         ),
                       ],
                     ),
@@ -167,7 +188,7 @@ class _RecurringScreenState extends State<RecurringScreen> {
                   children: [
                     ListTile(
                       title: Text(
-                        '${occurrence.description} - ${widget.store.currency.symbol}${widget.store.currency.format(occurrence.amount)}',
+                        '${occurrence.description} - ${widget.store.currency.symbol}${widget.store.currency.formatGrouped(occurrence.amount)}',
                       ),
                       subtitle: Text(
                         '${occurrence.type.name} - ${dayKey(occurrence.date)} - ${occurrence.status == 'posted' && occurrence.transactionId == null ? 'Posted, then deleted manually' : occurrence.status}${occurrence.error == null ? '' : '\n${occurrence.error}'}',
@@ -265,7 +286,9 @@ class _RecurringFormState extends State<RecurringForm> {
     final rule = widget.rule;
     description = TextEditingController(text: rule?.description ?? '');
     amount = TextEditingController(
-      text: rule == null ? '' : widget.store.currency.format(rule.amount),
+      text: rule == null
+          ? ''
+          : widget.store.currency.formatGrouped(rule.amount),
     );
     interval = TextEditingController(text: '${rule?.interval ?? 1}');
     type = rule?.type ?? EntryType.expense;
@@ -302,7 +325,7 @@ class _RecurringFormState extends State<RecurringForm> {
           isAsset: type == EntryType.income && isAsset,
           isLiability: type == EntryType.expense && isLiability,
           description: description.text.trim(),
-          amount: widget.store.currency.parse(amount.text),
+          amount: widget.store.currency.parseInput(amount.text),
           category: category!,
           accountId: accountId!,
           day: day,
@@ -349,6 +372,11 @@ class _RecurringFormState extends State<RecurringForm> {
           ),
         ],
       ),
+      bottomNavigationBar: BottomActionBar(
+        label: 'Save recurring payment',
+        busy: busy,
+        onPressed: save,
+      ),
       body: Form(
         key: form,
         child: ListView(
@@ -367,20 +395,6 @@ class _RecurringFormState extends State<RecurringForm> {
                       isLiability = false;
                     }),
             ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(type == EntryType.income ? 'Asset' : 'Liability'),
-              value: type == EntryType.income ? isAsset : isLiability,
-              onChanged: busy
-                  ? null
-                  : (value) => setState(() {
-                      if (type == EntryType.income) {
-                        isAsset = value;
-                      } else {
-                        isLiability = value;
-                      }
-                    }),
-            ),
             TextFormField(
               controller: description,
               enabled: !busy,
@@ -391,45 +405,50 @@ class _RecurringFormState extends State<RecurringForm> {
                   s == null || s.trim().isEmpty ? 'Enter a description.' : null,
             ),
             const SizedBox(height: 16),
-            TextFormField(
-              controller: amount,
-              enabled: !busy,
-              decoration: InputDecoration(
-                labelText: 'Amount (${widget.store.currency.symbol.trim()})',
-              ),
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              validator: (s) {
-                try {
-                  if (widget.store.currency.parse(s ?? '') <= 0) {
-                    return 'Enter an amount greater than zero.';
+            ResponsivePair(
+              left: TextFormField(
+                controller: amount,
+                inputFormatters: const [GroupedAmountFormatter()],
+                enabled: !busy,
+                decoration: InputDecoration(
+                  labelText: 'Amount (${widget.store.currency.symbol.trim()})',
+                ),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                validator: (s) {
+                  try {
+                    if (widget.store.currency.parseInput(s ?? '') <= 0) {
+                      return 'Enter an amount greater than zero.';
+                    }
+                  } on FormatException catch (e) {
+                    return e.message;
                   }
-                } on FormatException catch (e) {
-                  return e.message;
-                }
-                return null;
-              },
-            ),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              key: ValueKey('category-$type'),
-              initialValue: category,
-              decoration: InputDecoration(
-                labelText: type == EntryType.income
-                    ? 'Income category'
-                    : 'Expense category',
+                  return null;
+                },
               ),
-              items: widget.store
-                  .categoriesFor(type)
-                  .map(
-                    (c) => DropdownMenuItem(value: c.name, child: Text(c.name)),
-                  )
-                  .toList(),
-              onChanged: busy
-                  ? null
-                  : (value) => setState(() => category = value),
-              validator: (value) => value == null ? 'Select a category.' : null,
+              right: DropdownButtonFormField<String>(
+                isExpanded: true,
+                key: ValueKey('category-$type'),
+                initialValue: category,
+                decoration: InputDecoration(
+                  labelText: type == EntryType.income
+                      ? 'Income category'
+                      : 'Expense category',
+                ),
+                items: widget.store
+                    .categoriesFor(type)
+                    .map(
+                      (c) =>
+                          DropdownMenuItem(value: c.name, child: Text(c.name)),
+                    )
+                    .toList(),
+                onChanged: busy
+                    ? null
+                    : (value) => setState(() => category = value),
+                validator: (value) =>
+                    value == null ? 'Select a category.' : null,
+              ),
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<int>(
@@ -461,28 +480,31 @@ class _RecurringFormState extends State<RecurringForm> {
                   : null,
             ),
             const SizedBox(height: 16),
-            DropdownButtonFormField<int>(
-              initialValue: day,
-              decoration: const InputDecoration(labelText: 'Day of month'),
-              items: List.generate(
-                31,
-                (i) => DropdownMenuItem(value: i + 1, child: Text('${i + 1}')),
+            ResponsivePair(
+              left: DropdownButtonFormField<int>(
+                initialValue: day,
+                decoration: const InputDecoration(labelText: 'Day of month'),
+                items: List.generate(
+                  31,
+                  (i) =>
+                      DropdownMenuItem(value: i + 1, child: Text('${i + 1}')),
+                ),
+                onChanged: busy
+                    ? null
+                    : (value) => setState(() => day = value!),
               ),
-              onChanged: busy ? null : (value) => setState(() => day = value!),
-            ),
-            TextFormField(
-              controller: interval,
-              enabled: !busy,
-              decoration: const InputDecoration(
-                labelText: 'Repeat every N months',
+              right: TextFormField(
+                controller: interval,
+                enabled: !busy,
+                decoration: const InputDecoration(labelText: 'Every N months'),
+                keyboardType: TextInputType.number,
+                validator: (s) {
+                  final n = int.tryParse(s ?? '');
+                  return n == null || n < 1 || n > 120
+                      ? 'Use 1 to 120 months.'
+                      : null;
+                },
               ),
-              keyboardType: TextInputType.number,
-              validator: (s) {
-                final n = int.tryParse(s ?? '');
-                return n == null || n < 1 || n > 120
-                    ? 'Use 1 to 120 months.'
-                    : null;
-              },
             ),
             ListTile(
               contentPadding: EdgeInsets.zero,
@@ -506,43 +528,56 @@ class _RecurringFormState extends State<RecurringForm> {
                       }
                     },
             ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(
-                end == null ? 'End date: none' : 'End date: ${dayKey(end!)}',
+            ResponsivePair(
+              left: ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  end == null ? 'End date: none' : 'End date: ${dayKey(end!)}',
+                ),
+                trailing: end == null
+                    ? const Icon(Icons.calendar_today)
+                    : IconButton(
+                        tooltip: 'Clear end date',
+                        onPressed: busy
+                            ? null
+                            : () => setState(() => end = null),
+                        icon: const Icon(Icons.clear),
+                      ),
+                onTap: busy
+                    ? null
+                    : () async {
+                        final today = dateOnly(DateTime.now());
+                        final date = await showDatePicker(
+                          context: context,
+                          initialDate: end ?? today,
+                          firstDate: DateTime(2000),
+                          lastDate: DateTime(2100),
+                        );
+                        if (date != null && mounted) {
+                          setState(() => end = date);
+                        }
+                      },
               ),
-              trailing: end == null
-                  ? const Icon(Icons.calendar_today)
-                  : IconButton(
-                      tooltip: 'Clear end date',
-                      onPressed: busy ? null : () => setState(() => end = null),
-                      icon: const Icon(Icons.clear),
-                    ),
-              onTap: busy
-                  ? null
-                  : () async {
-                      final today = dateOnly(DateTime.now());
-                      final date = await showDatePicker(
-                        context: context,
-                        initialDate: end ?? today,
-                        firstDate: DateTime(2000),
-                        lastDate: DateTime(2100),
-                      );
-                      if (date != null && mounted) {
-                        setState(() => end = date);
-                      }
-                    },
+              right: SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(type == EntryType.income ? 'Asset' : 'Liability'),
+                value: type == EntryType.income ? isAsset : isLiability,
+                onChanged: busy
+                    ? null
+                    : (value) => setState(() {
+                        if (type == EntryType.income) {
+                          isAsset = value;
+                        } else {
+                          isLiability = value;
+                        }
+                      }),
+              ),
             ),
             if (error != null)
               Text(
                 error!,
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: busy ? null : save,
-              child: Text(busy ? 'Saving...' : 'Save recurring payment'),
-            ),
           ],
         ),
       ),

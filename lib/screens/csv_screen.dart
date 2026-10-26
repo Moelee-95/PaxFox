@@ -10,6 +10,7 @@ import '../core/presentation/entry_type_picker.dart';
 import '../core/data/ledger_store.dart';
 import '../core/data/transaction_csv.dart';
 import '../core/domain/ledger.dart';
+import '../core/domain/number_format.dart';
 import '../core/presentation/bottom_action_bar.dart';
 import '../core/presentation/info_button.dart';
 
@@ -144,7 +145,10 @@ class _CsvScreenState extends State<CsvScreen> {
       Uint8List.fromList(utf8.encode(TransactionCsv.encode(entries))),
     );
     if (mounted && saved) {
-      setState(() => result = 'Exported ${entries.length} transactions.');
+      setState(
+        () =>
+            result = 'Exported ${formatInteger(entries.length)} transactions.',
+      );
     }
   });
 
@@ -158,14 +162,14 @@ class _CsvScreenState extends State<CsvScreen> {
     if (mounted) {
       setState(() {
         result =
-            'Imported ${saved.imported} transactions. Skipped ${saved.skipped} existing matches.';
+            'Imported ${formatInteger(saved.imported)} transactions. Skipped ${formatInteger(saved.skipped)} existing matches.';
         preview = null;
         file = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'CSV import complete: ${saved.imported} added, ${saved.skipped} skipped.',
+            'CSV import complete: ${formatInteger(saved.imported)} added, ${formatInteger(saved.skipped)} skipped.',
           ),
           duration: const Duration(seconds: 5),
         ),
@@ -203,13 +207,13 @@ class _CsvScreenState extends State<CsvScreen> {
             return Card(
               color: rowError ? colors.errorContainer : null,
               child: ListTile(
-                title: Text('${row.number}. ${e.description}'),
+                title: Text('${formatInteger(row.number)}. ${e.description}'),
                 subtitle: Text(
                   '${dayKey(e.date)} · ${e.category}'
                   '${e.notes.isEmpty ? '' : '\n${e.notes}'}${rowError ? '\n$error' : ''}',
                 ),
                 trailing: Text(
-                  '${widget.store.currency.symbol}${widget.store.currency.format(e.amount)}',
+                  '${widget.store.currency.symbol}${widget.store.currency.formatGrouped(e.amount)}',
                 ),
               ),
             );
@@ -307,7 +311,7 @@ class _CsvScreenState extends State<CsvScreen> {
               if (data != null) ...[
                 const SizedBox(height: 12),
                 Text(
-                  '${rows.length} valid rows · ${widget.store.currency.symbol}${widget.store.currency.format(rows.fold<int>(0, (total, row) => total + row.entry.amount))}',
+                  '${formatInteger(rows.length)} valid rows · ${widget.store.currency.symbol}${widget.store.currency.formatGrouped(rows.fold<int>(0, (total, row) => total + row.entry.amount))}',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 if (data.errors.isNotEmpty) ...[

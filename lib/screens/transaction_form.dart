@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../core/presentation/grouped_amount_formatter.dart';
+
 import '../core/presentation/entry_type_picker.dart';
 
 import '../core/data/ledger_store.dart';
@@ -49,7 +51,7 @@ class _TransactionFormState extends State<TransactionForm> {
     accountId = e?.accountId;
     destinationId = e?.destinationId;
     amount = TextEditingController(
-      text: e == null ? '' : currency.format(e.amount),
+      text: e == null ? '' : currency.formatGrouped(e.amount),
     );
     description = TextEditingController(text: e?.description ?? '');
     category = e?.type == EntryType.transfer ? null : e?.category;
@@ -77,7 +79,7 @@ class _TransactionFormState extends State<TransactionForm> {
         LedgerEntry(
           id: widget.entry?.id,
           type: type,
-          amount: currency.parse(amount.text),
+          amount: currency.parseInput(amount.text),
           currency: currency,
           date: date,
           description: description.text.trim(),
@@ -280,6 +282,7 @@ class _TransactionFormState extends State<TransactionForm> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: amount,
+                inputFormatters: const [GroupedAmountFormatter()],
                 enabled: !saving,
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
@@ -290,7 +293,7 @@ class _TransactionFormState extends State<TransactionForm> {
                 ),
                 validator: (s) {
                   try {
-                    if (currency.parse(s ?? '') <= 0) {
+                    if (currency.parseInput(s ?? '') <= 0) {
                       return 'Amount must be greater than zero.';
                     }
                   } on FormatException catch (e) {

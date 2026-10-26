@@ -43,13 +43,14 @@ Migration sequence: v1 ledger/accounts; v2 settings; v3 categories; v4 account k
 
 | Concern | Required behavior |
 | --- | --- |
-| Money | Integer minor units, EUR/USD/GBP 2 decimals and IQD 3 decimals; comma/point input; no grouping in numeric entry. New amounts positive and at most `9000000000000000` cents. Signed opening balances and invoice line prices have separate handling. |
+| Money | Integer minor units, EUR/USD/GBP 2 decimals and IQD 3 decimals; UI displays and money inputs use comma thousands separators and dot decimals. UI parsing accepts grouped values; an unambiguous decimal comma (12,50) is normalized, while 1,234 means one thousand two hundred thirty-four. Strict domain parsing, extraction JSON and CSV serialization keep their existing ungrouped-decimal contract. Grouping never changes stored minor units or currency precision. New amounts positive and at most `9000000000000000` cents. Signed opening balances and invoice line prices have separate handling. |
 | Type effects | Expense: source minus, spending plus. Income: source plus, income plus. Refund: source plus, spending minus. Transfer: source minus/destination plus, no income/spending. |
 | Assignment | Normal new expenses/income require an account. Historical CSV/bulk unassigned entries count in reports but do not alter balances; edits can retain that state. Refunds may be unassigned. Transfers require two distinct existing same-currency accounts. |
 | Availability | Blocked means `available=false`: include in wealth, exclude from spendable, reject expenses/outgoing transfers, allow income/refunds/incoming transfers. |
 | Overdraft | Cash never negative; each bank needs explicit overdraft permission. Related writes validate affected accounts' daily balances, including protected historical/future deficits. Bulk operations validate the final combined result. |
 | Opening date | New accounts include same-day transactions (`includeOnAsOf=true`); legacy end-of-day snapshots include strictly later dates. Display balances stop at today; reports use selected transaction month, including future dates. |
 | Debts | Outstanding liabilities entered in setup or Accounts. Net account wealth = gross account balances minus total outstanding debt; spendable/blocked balances and income/spending reports remain account-based. Borrowed funds already held belong in starting account balances. Repayments are recorded separately as account transactions, then outstanding debt is updated manually; saving/deleting debt never posts a payment. |
+| Account deletion | Only unused bank accounts can be deleted. Reject source/destination transaction links and recurring rules/history, including archived rules and rows in other currencies. Eligibility is cached in the read snapshot for UI; deletion rechecks all links inside its SQLite transaction. Cash accounts cannot be deleted. Deletion removes the opening balance from wealth; no transaction or rule is deleted. |
 | Correction | AccountForm changes opening baseline by desired-current difference, preserving opening date and payments. It is not a reconciliation transaction or independent dated snapshot. |
 | Dates | Transaction/schedule days are local calendar `YYYY-MM-DD`. Creation/update times are UTC ISO strings. `createdAt` is read from storage, preserved by edits, displayed locally; invalid/missing legacy times are omitted. |
 | Categories | Refunds use expense categories; transfer label is fixed. Rename updates matching ledger, recurring, receipt item and legacy receipt-draft labels atomically; original batch extraction JSON remains source history. Changing an icon does not rewrite money. The picker offers 92 curated built-in Material icons; persisted IDs remain enum names, including all legacy names. No raw glyph codes or new dependencies are stored. |
@@ -65,7 +66,7 @@ All methods below are on `LedgerStore` in `lib/core/data/ledger_store.dart`.
 | --- | --- |
 | Open/read | `open`, `refresh`, `monthSummary`, `searchEntries`, `currentBalances`, `categoriesFor`, `iconFor`. |
 | Ledger | `saveEntry`, `deleteEntry`/`deleteEntries`, `updateEntries`; shared private `_writeEntry`, `_checkFunds`. |
-| Accounts/onboarding | `addAccount`, `updateAccount`, `completeSetup` (optional selected currency and initial debts), `saveDebt`, `deleteDebt`. |
+| Accounts/onboarding | `addAccount`, `updateAccount`, `canDeleteBankAccount`, `deleteBankAccount`, `completeSetup` (optional selected currency and initial debts), `saveDebt`, `deleteDebt`. |
 | Categories | `saveCategory` (also handles rename cascade). |
 | Settings | `saveInvoiceTimeout`. |
 | CSV | `importCsv`. Codec lives outside store. |

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/data/ledger_store.dart';
 import '../core/domain/category.dart';
 import '../core/domain/ledger.dart';
+import '../core/domain/number_format.dart';
 import '../core/presentation/confirmation_dialog.dart';
 
 enum TransactionBulkAction { category, account, delete }
@@ -24,7 +25,7 @@ class TransactionBulkEditor {
     if (action == TransactionBulkAction.delete) {
       final confirmed = await confirmAction(
         context,
-        title: 'Delete ${ids.length} transactions?',
+        title: 'Delete ${formatInteger(ids.length)} transactions?',
         message:
             'This updates spending reports and any linked account balances.',
       );

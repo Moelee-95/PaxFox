@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'grouped_amount_formatter.dart';
+
 import '../domain/ledger.dart';
 import 'confirmation_dialog.dart';
 import 'info_button.dart';
@@ -27,7 +29,7 @@ class _DebtEditorState extends State<DebtEditor> {
   late final amount = TextEditingController(
     text: widget.debt == null
         ? ''
-        : widget.currency.format(widget.debt!.amount),
+        : widget.currency.formatGrouped(widget.debt!.amount),
   );
   bool busy = false;
   String? error;
@@ -94,6 +96,7 @@ class _DebtEditorState extends State<DebtEditor> {
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: amount,
+                  inputFormatters: const [GroupedAmountFormatter()],
                   enabled: !busy,
                   decoration: InputDecoration(
                     labelText: 'Outstanding amount (${widget.currency.code})',
@@ -103,7 +106,7 @@ class _DebtEditorState extends State<DebtEditor> {
                   ),
                   validator: (value) {
                     try {
-                      widget.currency.parse(value ?? '');
+                      widget.currency.parseInput(value ?? '');
                     } on FormatException catch (e) {
                       return e.message;
                     }
@@ -122,43 +125,59 @@ class _DebtEditorState extends State<DebtEditor> {
           ),
         ),
       ),
+      actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
       actions: [
-        if (widget.onDelete != null)
-          TextButton(
-            onPressed: busy
-                ? null
-                : () async {
-                    final yes = await confirmAction(
-                      context,
-                      title: 'Delete debt?',
-                      message: 'This removes the outstanding liability and increases net wealth. It does not record a repayment.',
-                    );
-                    if (yes == true && mounted) await run(widget.onDelete!);
-                  },
-            child: const Text('Delete'),
-          ),
-        TextButton(
-          onPressed: busy ? null : () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: busy
-              ? null
-              : () {
-                  if (form.currentState!.validate()) {
-                    run(
-                      () => widget.onSave(
-                        Debt(
-                          id: widget.debt?.id,
-                          name: name.text.trim(),
-                          amount: widget.currency.parse(amount.text),
-                          currency: widget.currency,
-                        ),
-                      ),
-                    );
-                  }
-                },
-          child: Text(busy ? 'Saving...' : 'Save debt'),
+        Row(
+          children: [
+            if (widget.onDelete != null)
+              Expanded(
+                child: TextButton(
+                  onPressed: busy
+                      ? null
+                      : () async {
+                          final yes = await confirmAction(
+                            context,
+                            title: 'Delete debt?',
+                            message: 'This removes the outstanding liability and increases net wealth. It does not record a repayment.',
+                          );
+                          if (yes == true && mounted) {
+                            await run(widget.onDelete!);
+                          }
+                        },
+                  child: const FittedBox(child: Text('Delete')),
+                ),
+              ),
+            Expanded(
+              child: TextButton(
+                onPressed: busy ? null : () => Navigator.pop(context),
+                child: const FittedBox(child: Text('Cancel')),
+              ),
+            ),
+            Expanded(
+              child: FilledButton(
+                onPressed: busy
+                    ? null
+                    : () {
+                        if (form.currentState!.validate()) {
+                          run(
+                            () => widget.onSave(
+                              Debt(
+                                id: widget.debt?.id,
+                                name: name.text.trim(),
+                                amount: widget.currency.parseInput(amount.text),
+                                currency: widget.currency,
+                              ),
+                            ),
+                          );
+                        }
+                      },
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(busy ? 'Saving...' : 'Save debt'),
+                ),
+              ),
+            ),
+          ],
         ),
       ],
     ),

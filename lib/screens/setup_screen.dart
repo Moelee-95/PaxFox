@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/presentation/grouped_amount_formatter.dart';
+
 import '../core/data/ledger_store.dart';
 import '../core/domain/ledger.dart';
 import '../core/presentation/debt_editor.dart';
@@ -56,7 +58,7 @@ class _SetupScreenState extends State<SetupScreen> {
 
   int bankAmount(String input) {
     final trimmed = input.trim();
-    return currency.parse(trimmed.replaceFirst(RegExp(r'^-'), '')) *
+    return currency.parseInput(trimmed.replaceFirst(RegExp(r'^-'), '')) *
         (trimmed.startsWith('-') ? -1 : 1);
   }
 
@@ -85,7 +87,7 @@ class _SetupScreenState extends State<SetupScreen> {
             Account(
               name: 'Cash',
               currency: currency,
-              opening: currency.parse(cash.text),
+              opening: currency.parseInput(cash.text),
               asOf: today,
               kind: AccountKind.cash,
               includeOnAsOf: true,
@@ -118,7 +120,7 @@ class _SetupScreenState extends State<SetupScreen> {
 
   Future<void> editDebt([int? index]) => showDialog<void>(
     context: context,
-    barrierDismissible: false,
+    barrierDismissible: true,
     builder: (_) => DebtEditor(
       currency: currency,
       debt: index == null ? null : debts[index],
@@ -206,6 +208,7 @@ class _SetupScreenState extends State<SetupScreen> {
                       else
                         TextFormField(
                           controller: cash,
+                          inputFormatters: const [GroupedAmountFormatter()],
                           decoration: InputDecoration(
                             labelText:
                                 'Cash balance (${currency.symbol.trim()})',
@@ -215,7 +218,7 @@ class _SetupScreenState extends State<SetupScreen> {
                           ),
                           validator: (value) {
                             try {
-                              currency.parse(value ?? '');
+                              currency.parseInput(value ?? '');
                             } on FormatException catch (e) {
                               return e.message;
                             }
@@ -251,7 +254,7 @@ class _SetupScreenState extends State<SetupScreen> {
                         ListTile(
                           title: Text(account.name),
                           subtitle: Text(
-                            'Existing account kept · ${currency.symbol}${currency.format(accountBalance(account, widget.store.entries, DateTime.now()))}',
+                            'Existing account kept · ${currency.symbol}${currency.formatGrouped(accountBalance(account, widget.store.entries, DateTime.now()))}',
                           ),
                         ),
                       if (!hasBank)
@@ -281,6 +284,9 @@ class _SetupScreenState extends State<SetupScreen> {
                                   const SizedBox(height: 16),
                                   TextFormField(
                                     controller: banks[i].balance,
+                                    inputFormatters: const [
+                                      GroupedAmountFormatter(),
+                                    ],
                                     decoration: InputDecoration(
                                       labelText:
                                           'Bank balance (${currency.symbol.trim()})',
@@ -339,14 +345,14 @@ class _SetupScreenState extends State<SetupScreen> {
                   ListTile(
                     title: const Text('Cash'),
                     trailing: Text(
-                      '${currency.symbol}${currency.format(currency.parse(cash.text))}',
+                      '${currency.symbol}${currency.formatGrouped(currency.parseInput(cash.text))}',
                     ),
                   ),
                 for (final account in widget.store.accounts)
                   ListTile(
                     title: Text('${account.name} (kept)'),
                     trailing: Text(
-                      '${currency.symbol}${currency.format(accountBalance(account, widget.store.entries, DateTime.now()))}',
+                      '${currency.symbol}${currency.formatGrouped(accountBalance(account, widget.store.entries, DateTime.now()))}',
                     ),
                   ),
                 if (!noBank)
@@ -354,7 +360,7 @@ class _SetupScreenState extends State<SetupScreen> {
                     ListTile(
                       title: Text(bank.name.text.trim()),
                       trailing: Text(
-                        '${currency.symbol}${currency.format(bankAmount(bank.balance.text))}',
+                        '${currency.symbol}${currency.formatGrouped(bankAmount(bank.balance.text))}',
                       ),
                     ),
                 const Text(
