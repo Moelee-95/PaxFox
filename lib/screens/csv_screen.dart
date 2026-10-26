@@ -11,6 +11,7 @@ import '../core/data/ledger_store.dart';
 import '../core/data/transaction_csv.dart';
 import '../core/domain/ledger.dart';
 import '../core/presentation/bottom_action_bar.dart';
+import '../core/presentation/info_button.dart';
 
 typedef CsvFile = ({String name, Uint8List bytes});
 
@@ -181,7 +182,15 @@ class _CsvScreenState extends State<CsvScreen> {
     final data = preview;
     final rows = data?.rows ?? <CsvTransactionRow>[];
     return Scaffold(
-      appBar: AppBar(title: const Text('Import & export CSV')),
+      appBar: AppBar(
+        title: const Text('Import & export CSV'),
+        actions: const [
+          InfoButton(
+            title: 'CSV import and export',
+            message: 'Date · Details · Category · Cost · Notes more info Example: 1.10.26, Bank Fee, Service, 4.95.  Account and type are optional. Unassigned expenses count in transactions and reports without changing account balances.  Leaving the type unset treats rows as expenses. All dates are included in exports.  Transfers require two accounts and are not supported by this five-column format. Skip existing matches compares date, details, category, cost, notes, type and account; repeated purchases within a file are preserved. Missing categories receive a general icon. Import updates balances using normal account rules; dates before the opening balance count as history.',
+          ),
+        ],
+      ),
       body: ListView.builder(
         controller: scroll,
         padding: const EdgeInsets.all(16),
@@ -208,18 +217,6 @@ class _CsvScreenState extends State<CsvScreen> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'Date · Details · Category · Cost · Notes more info',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Example: 1.10.26, Bank Fee, Service, 4.95.\n'
-                'Account and type are optional. Unassigned expenses count in transactions and reports without changing account balances. '
-                'Leaving the type unset treats rows as expenses. All dates are included in exports. '
-                'Transfers require two accounts and are not supported by this five-column format.',
-              ),
-              const SizedBox(height: 16),
               DropdownButtonFormField<int>(
                 initialValue: accountId,
                 hint: const Text('Unassigned (payment unknown)'),
@@ -301,18 +298,10 @@ class _CsvScreenState extends State<CsvScreen> {
                 SwitchListTile.adaptive(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Skip existing matches'),
-                  subtitle: const Text(
-                    'Matches date, details, category, cost, notes, type and account. Repeated purchases within the file are preserved.',
-                  ),
                   value: skipExisting,
                   onChanged: busy
                       ? null
                       : (value) => setState(() => skipExisting = value),
-                ),
-                const Text(
-                  'Missing categories will be created with a general icon. '
-                  'Import adds transactions and updates balances using the normal account rules. '
-                  'Dates before the account opening balance are treated as history.',
                 ),
               ],
               if (data != null) ...[

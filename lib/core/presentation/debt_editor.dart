@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../domain/ledger.dart';
 import 'confirmation_dialog.dart';
+import 'info_button.dart';
 
 class DebtEditor extends StatefulWidget {
   const DebtEditor({
@@ -62,7 +63,15 @@ class _DebtEditorState extends State<DebtEditor> {
   Widget build(BuildContext context) => PopScope(
     canPop: !busy,
     child: AlertDialog(
-      title: Text(widget.debt == null ? 'Add debt' : 'Edit debt'),
+      title: Row(
+        children: [
+          Expanded(child: Text(widget.debt == null ? 'Add debt' : 'Edit debt')),
+          InfoButton(
+            title: 'About debts',
+            message: 'Enter what you still owe to a person or bank. Debts reduce account wealth. Update the remaining amount after repayments; record the payment separately in your account.',
+          ),
+        ],
+      ),
       content: SizedBox(
         width: 420,
         child: Form(
@@ -72,10 +81,6 @@ class _DebtEditorState extends State<DebtEditor> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text(
-                  'Enter what you still owe to a person or bank. Debts reduce account wealth. Update the remaining amount after repayments; record the payment separately in your account.',
-                ),
-                const SizedBox(height: 20),
                 TextFormField(
                   controller: name,
                   enabled: !busy,

@@ -11,7 +11,6 @@ Form/dialog -> LedgerStore public method -> validated SQLite transaction
 
 LedgerIndex -> visited-month summaries + normalized text + most recent search
 currentBalances -> one ledger pass -> cache until snapshot/local day changes
-FreedomScreen -> projection cache keyed by plan object + salary-loss toggle
 ```
 
 No Provider/Riverpod/BLoC/service locator/router framework. Store is injected through constructors. Snapshot lists/sets are unmodifiable; never mutate them to simulate a write. Failed reads retain the last complete snapshot. The entire active ledger is loaded into memory; list rendering is lazy, database pagination is not implemented. `Totals` is a mutable calculation accumulator, not a persisted entity.
@@ -27,8 +26,8 @@ This is the logical schema after migrations, not a replacement DDL script. SQL b
 | `accounts` | `id`, name, currency, opening, `as_of`, available, kind, `include_on_as_of`, `allow_overdraft`. |
 | `transactions` | `id`, type, positive amount, currency, date, description, category label, `account_id`, `destination_id`, notes, `created_at`, `updated_at`. Both account links reference `accounts`. |
 | `debts` | `id`, lender/name, outstanding nonnegative `amount`, currency, UTC `created_at` and `updated_at`. No account FK; not a payment source or expense. |
-| `categories` | `id`, kind (expense/income), name, stable icon; case-insensitive name uniqueness within kind. Transactions reference labels, not category IDs. |
-| `settings` | key/value text; `setup_completed`, `app_currency` (absent on upgrades means EUR), `financial_plan` JSON, `invoice_timeout_seconds`. |
+| `categories` | `id`, kind (expense/income), name, stable string icon ID; case-insensitive name uniqueness within kind. Transactions reference labels, not category IDs. |
+| `settings` | key/value text; `setup_completed`, `app_currency` (absent on upgrades means EUR), `invoice_timeout_seconds`. |
 | `recurring_rules` | `id`, description, type, amount, category, account FK, day, interval, `next_date`, optional `end_date`, active, archived, `is_asset`, `is_liability`. |
 | `recurring_occurrences` | `id`, rule FK, scheduled date and copied type/description/amount/category/account, status, error, transaction FK. Unique rule/date; deleting transaction sets link null. |
 | `receipts` | Legacy one-expense receipt: unique transaction FK with cascade delete, total, draft JSON, image paths JSON, raw response, scan time. |
@@ -53,10 +52,10 @@ Migration sequence: v1 ledger/accounts; v2 settings; v3 categories; v4 account k
 | Debts | Outstanding liabilities entered in setup or Accounts. Net account wealth = gross account balances minus total outstanding debt; spendable/blocked balances and income/spending reports remain account-based. Borrowed funds already held belong in starting account balances. Repayments are recorded separately as account transactions, then outstanding debt is updated manually; saving/deleting debt never posts a payment. |
 | Correction | AccountForm changes opening baseline by desired-current difference, preserving opening date and payments. It is not a reconciliation transaction or independent dated snapshot. |
 | Dates | Transaction/schedule days are local calendar `YYYY-MM-DD`. Creation/update times are UTC ISO strings. `createdAt` is read from storage, preserved by edits, displayed locally; invalid/missing legacy times are omitted. |
-| Categories | Refunds use expense categories; transfer label is fixed. Rename updates matching ledger, recurring, receipt item and legacy receipt-draft labels atomically; original batch extraction JSON remains source history. Changing an icon does not rewrite money. |
-| Currency | One currency chosen during first-run setup (EUR/USD/GBP/IQD), committed atomically with accounts/debts/setup marker. No FX conversion. Upgrades keep EUR as the active currency. Other-currency records stay stored and excluded from active views; never relabel their amounts. Forms, reports, plan inputs, recurrence, invoice review and CSV use the active currency. Changing currency after setup is not exposed. |
+| Categories | Refunds use expense categories; transfer label is fixed. Rename updates matching ledger, recurring, receipt item and legacy receipt-draft labels atomically; original batch extraction JSON remains source history. Changing an icon does not rewrite money. The picker offers 92 curated built-in Material icons; persisted IDs remain enum names, including all legacy names. No raw glyph codes or new dependencies are stored. |
+| Currency | One currency chosen during first-run setup (EUR/USD/GBP/IQD), committed atomically with accounts/debts/setup marker. No FX conversion. Upgrades keep EUR as the active currency. Other-currency records stay stored and excluded from active views; never relabel their amounts. Forms, reports, recurrence, invoice review and CSV use the active currency. Changing currency after setup is not exposed. |
 
-Financial plan: explicit independent cash/portfolio/spending/passive/earned/contribution assumptions. Rates are integer basis points. Portfolio target = positive annual spending gap / withdrawal rate, rounded up; FI excludes earned income. Monthly growth uses annual nominal rate / 12 with half-away-from-zero rounding. Salary loss removes earned income, not contributions. Horizon is 1-50 years; no attained date is fabricated. Account cash is not automatically a portfolio, asset/liability switches do not affect projections, and post-cash-depletion results depend on external funding.
+Cashflow is an empty placeholder. Its previous plan model, projection engine, form and store API have been removed. Existing `financial_plan` settings are left untouched as unused legacy data; they are no longer read or written.
 
 ## Store API
 
@@ -68,7 +67,7 @@ All methods below are on `LedgerStore` in `lib/core/data/ledger_store.dart`.
 | Ledger | `saveEntry`, `deleteEntry`/`deleteEntries`, `updateEntries`; shared private `_writeEntry`, `_checkFunds`. |
 | Accounts/onboarding | `addAccount`, `updateAccount`, `completeSetup` (optional selected currency and initial debts), `saveDebt`, `deleteDebt`. |
 | Categories | `saveCategory` (also handles rename cascade). |
-| Plan/settings | `savePlan`, `saveInvoiceTimeout`. |
+| Settings | `saveInvoiceTimeout`. |
 | CSV | `importCsv`. Codec lives outside store. |
 | Recurring | `saveRecurring`, `processRecurring`, `setRecurringActive`, `archiveRecurring`, `retryRecurring`, `skipRecurring`. |
 | Receipts | `saveInvoiceBatch`, `scannedInvoiceFor`; legacy `saveInvoice`, `receiptFor`. |

@@ -256,7 +256,10 @@ void main() {
             store.db.update('transactions', {'description': 'Refreshed name'}),
       );
       expect(find.text('Original name'), findsOneWidget);
-      await tester.drag(find.byType(ListView).first, const Offset(0, 350));
+      await tester.drag(
+        find.byType(CustomScrollView).first,
+        const Offset(0, 350),
+      );
       for (var frame = 0; frame < 10; frame++) {
         await tester.pump(const Duration(milliseconds: 200));
         await tester.runAsync(

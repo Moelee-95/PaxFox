@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 enum MainMenuDestination {
   home('Home', Icons.home_outlined),
   transactions('All transactions', Icons.receipt_long_outlined),
-  reports('Reports', Icons.bar_chart),
   categories('Categories', Icons.category_outlined),
   accounts('Accounts', Icons.account_balance_wallet_outlined),
   settings('Settings', Icons.settings_outlined),
@@ -19,12 +18,10 @@ class MainDrawer extends StatelessWidget {
   const MainDrawer({
     super.key,
     required this.onSelected,
-    required this.showReports,
     this.showTransactions = false,
   });
 
   final ValueChanged<MainMenuDestination> onSelected;
-  final bool showReports;
   final bool showTransactions;
 
   @override
@@ -41,9 +38,8 @@ class MainDrawer extends StatelessWidget {
               leading: Icon(destination.icon),
               title: Text(destination.label),
               selected:
-                  (showReports && destination == MainMenuDestination.reports) ||
                   (showTransactions &&
-                      destination == MainMenuDestination.transactions),
+                  destination == MainMenuDestination.transactions),
               onTap: () => onSelected(destination),
             ),
         ],

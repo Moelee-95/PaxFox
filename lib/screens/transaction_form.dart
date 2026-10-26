@@ -277,17 +277,17 @@ class _TransactionFormState extends State<TransactionForm> {
                     ? 'Enter a description.'
                     : null,
               ),
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Text('Currency: ${widget.store.currency.code}'),
-              ),
+              const SizedBox(height: 16),
               TextFormField(
                 controller: amount,
                 enabled: !saving,
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
-                decoration: const InputDecoration(labelText: 'Amount'),
+                decoration: InputDecoration(
+                  labelText: 'Amount',
+                  prefixText: '${currency.symbol.trim()} ',
+                ),
                 validator: (s) {
                   try {
                     if (currency.parse(s ?? '') <= 0) {

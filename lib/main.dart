@@ -37,7 +37,7 @@ class _MyAppState extends State<MyApp> {
         border: OutlineInputBorder(
           borderRadius: BorderRadius.all(Radius.circular(6)),
         ),
-        floatingLabelBehavior: FloatingLabelBehavior.always,
+        floatingLabelBehavior: FloatingLabelBehavior.auto,
         contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 18),
         isDense: false,
       ),
@@ -50,7 +50,7 @@ class _MyAppState extends State<MyApp> {
         border: OutlineInputBorder(
           borderRadius: BorderRadius.all(Radius.circular(6)),
         ),
-        floatingLabelBehavior: FloatingLabelBehavior.always,
+        floatingLabelBehavior: FloatingLabelBehavior.auto,
         contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 18),
         isDense: false,
       ),

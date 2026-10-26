@@ -287,12 +287,12 @@ void main() {
         var notifications = 0;
         store.addListener(() => notifications++);
         await store.db.insert('settings', {
-          'key': 'financial_plan',
-          'value': 'invalid json',
+          'key': 'app_currency',
+          'value': 'invalid currency',
         });
         await store.db.update('accounts', {'name': 'New name'});
 
-        await expectLater(store.refresh(), throwsFormatException);
+        await expectLater(store.refresh(), throwsArgumentError);
         expect(store.accounts, same(accounts));
         expect(store.categories, same(categories));
         expect(store.accounts.single.name, 'Cash');
@@ -301,7 +301,7 @@ void main() {
         await store.db.delete(
           'settings',
           where: 'key = ?',
-          whereArgs: ['financial_plan'],
+          whereArgs: ['app_currency'],
         );
         await store.refresh();
         expect(store.accounts.single.name, 'New name');

@@ -6,7 +6,6 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../../features/receipts/invoice.dart';
 import '../../features/receipts/invoice_images.dart';
 import '../domain/category.dart';
-import '../domain/freedom.dart';
 import '../domain/ledger.dart';
 import '../domain/ledger_queries.dart';
 import '../domain/recurring.dart';
@@ -50,7 +49,6 @@ class LedgerStore extends ChangeNotifier {
     return _balances!;
   }
 
-  FreedomPlan? plan;
   bool hasLegacyCurrencyData = false;
   bool setupCompleted = false;
   Currency _currency = Currency.eur;
@@ -128,14 +126,7 @@ class LedgerStore extends ChangeNotifier {
         'categories',
         orderBy: 'name COLLATE NOCASE',
       )).map(LedgerCategory.fromMap).toList();
-      final planJson = settingsByKey['financial_plan'];
-      final planData = planJson == null
-          ? null
-          : jsonDecode(planJson) as Map<String, dynamic>;
-      final hasLegacyPlan =
-          planData != null && planData['currency'] != activeCurrency.name;
       final legacy =
-          hasLegacyPlan ||
           (await txn.query(
             'transactions',
             columns: ['id'],
@@ -150,9 +141,6 @@ class LedgerStore extends ChangeNotifier {
             whereArgs: [activeCurrency.name],
             limit: 1,
           )).isNotEmpty;
-      final nextPlan = planData == null || hasLegacyPlan
-          ? null
-          : FreedomPlan.fromMap(planData);
       final entryList = (await txn.query(
         'transactions',
         where: 'currency = ?',
@@ -175,7 +163,6 @@ class LedgerStore extends ChangeNotifier {
         setup: setup,
         categories: categoryList,
         legacy: legacy,
-        plan: nextPlan,
         entries: entryList,
         accounts: accountList,
       );
@@ -197,23 +184,10 @@ class LedgerStore extends ChangeNotifier {
         (category.kind, category.name): category,
     };
     hasLegacyCurrencyData = snapshot.legacy;
-    plan = snapshot.plan;
     _ledger = LedgerIndex(snapshot.entries);
     _accounts = List.unmodifiable(snapshot.accounts);
     _balances = null;
     notifyListeners();
-  }
-
-  Future<void> savePlan(FreedomPlan value) async {
-    if (value.currency != currency) {
-      throw ArgumentError('Use the app currency.');
-    }
-    projectFreedom(value);
-    await db.insert('settings', {
-      'key': 'financial_plan',
-      'value': jsonEncode(value.toMap()),
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
-    await refresh();
   }
 
   Future<void> saveEntry(LedgerEntry entry) async {

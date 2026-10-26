@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moneva/core/domain/ledger.dart';
 import 'package:moneva/core/data/ledger_store.dart';
-import 'package:moneva/core/domain/freedom.dart';
 import 'package:moneva/core/domain/category.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -265,7 +264,7 @@ void main() {
       );
     });
     test(
-      'EUR-only writes reject foreign transactions, accounts and plans',
+      'Default EUR currency rejects foreign transactions and accounts',
       () async {
         await expectLater(
           store.saveEntry(
@@ -291,24 +290,8 @@ void main() {
           ),
           throwsArgumentError,
         );
-        await expectLater(
-          store.savePlan(
-            FreedomPlan(
-              currency: Currency.iqd,
-              start: DateTime(2026),
-              spending: 1000,
-              passive: 0,
-              portfolio: 0,
-              contribution: 0,
-              earned: 0,
-              cash: 0,
-            ),
-          ),
-          throwsArgumentError,
-        );
         expect(store.entries, isEmpty);
         expect(store.accounts.every((a) => a.currency == Currency.eur), isTrue);
-        expect(store.plan, isNull);
       },
     );
     test('legacy non-EUR data remains unchanged and is excluded from active EUR data', () async {

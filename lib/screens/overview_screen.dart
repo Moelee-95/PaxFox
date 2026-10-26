@@ -1,29 +1,26 @@
 import 'package:flutter/material.dart';
 
 import '../core/data/ledger_store.dart';
-import '../core/domain/ledger_queries.dart';
 import '../core/presentation/account_balance_card.dart';
 import '../core/presentation/metric_card.dart';
 import '../core/presentation/responsive_pair.dart';
+import '../core/domain/ledger.dart';
+import '../core/presentation/debt_editor.dart';
+import 'accounts_screen.dart';
 
 class OverviewScreen extends StatelessWidget {
   const OverviewScreen({
     super.key,
     required this.store,
-    required this.month,
-    required this.summary,
     required this.onOpenRecurring,
     this.recurringError,
   });
 
   final LedgerStore store;
-  final DateTime month;
-  final MonthlyLedger summary;
   final VoidCallback onOpenRecurring;
   final String? recurringError;
 
-  Widget _monthlyOverview(BuildContext context) {
-    final monthly = summary.totalsFor(store.currency);
+  Widget _accountOverview(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final balances = store.currentBalances;
@@ -33,77 +30,18 @@ class OverviewScreen extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: colors.primaryContainer,
-            borderRadius: BorderRadius.circular(22),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Monthly overview',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: colors.onPrimaryContainer,
-                      ),
-                    ),
-                  ),
-                  Text(
-                    '${month.year}-${month.month.toString().padLeft(2, '0')}',
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: colors.onPrimaryContainer,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Net cashflow: ${store.currency.display(monthly.net)}',
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  color: colors.onPrimaryContainer,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              Text(
-                'Income minus spending after refunds',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: colors.onPrimaryContainer,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 10),
         ResponsivePair(
           left: MetricCard(
-            text: 'Income: ${store.currency.display(monthly.income)}',
-            icon: Icons.payments_outlined,
-            color: Colors.green,
-          ),
-          right: MetricCard(
-            text:
-                'Spending after refunds: ${store.currency.display(monthly.spending)}',
-            icon: Icons.shopping_bag_outlined,
-            color: Colors.red,
-          ),
-        ),
-        const SizedBox(height: 10),
-        ResponsivePair(
-          left: MetricCard(
-            text:
-                'Account wealth: ${store.currency.symbol}${store.currency.format(wealth)}',
+            label: 'Account wealth',
+            amount: store.currency.display(wealth),
             detail:
                 'Outstanding debts: ${store.currency.display(store.totalDebt)}',
             icon: Icons.account_balance_outlined,
             color: colors.primary,
           ),
           right: MetricCard(
-            text:
-                'Available to spend: ${store.currency.symbol}${store.currency.format(available)}',
+            label: 'Available to spend',
+            amount: store.currency.display(available),
             icon: Icons.account_balance_wallet_outlined,
             color: colors.primary,
             detail:
@@ -126,7 +64,7 @@ class OverviewScreen extends StatelessWidget {
     physics: const AlwaysScrollableScrollPhysics(),
     padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
     children: [
-      _monthlyOverview(context),
+      _accountOverview(context),
       if (recurringError != null)
         Padding(
           padding: const EdgeInsets.only(top: 12),
@@ -149,22 +87,81 @@ class OverviewScreen extends StatelessWidget {
             'No accounts configured. Add an opening balance to track available cash.',
           ),
         ),
-      if (store.accounts.isNotEmpty)
-        SizedBox(
-          height: 128 * MediaQuery.textScalerOf(context).scale(1).clamp(1, 2),
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: store.accounts.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 10),
-            itemBuilder: (context, index) {
-              final account = store.accounts[index];
-              final balance =
-                  store.currentBalances.byAccount[account.id] ??
-                  account.opening;
-              return AccountBalanceCard(account: account, balance: balance);
-            },
+      for (final account in store.accounts)
+        AccountBalanceCard(
+          account: account,
+          balance:
+              store.currentBalances.byAccount[account.id] ?? account.opening,
+          onEdit: () => Navigator.push(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => AccountForm(store: store, account: account),
+            ),
+          ),
+        ),
+      const SizedBox(height: 24),
+      Text(
+        'Debts',
+        style: Theme.of(context).textTheme.titleLarge
+            ?.copyWith(color: Theme.of(context).colorScheme.error),
+      ),
+      const SizedBox(height: 8),
+      if (store.debts.isEmpty) const Text('No outstanding debts.'),
+      for (final debt in store.debts)
+        Card(
+          color: Theme.of(context).colorScheme.errorContainer,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.account_balance_outlined,
+                      color: Theme.of(context).colorScheme.onErrorContainer,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        debt.name,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onErrorContainer,
+                            ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Edit debt ${debt.name}',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => _editDebt(context, debt),
+                      icon: const Icon(Icons.edit_outlined),
+                    ),
+                  ],
+                ),
+                Text(
+                  store.currency.display(debt.amount),
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onErrorContainer,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
     ],
+  );
+
+  Future<void> _editDebt(BuildContext context, Debt debt) => showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => DebtEditor(
+      currency: store.currency,
+      debt: debt,
+      onSave: store.saveDebt,
+      onDelete: () => store.deleteDebt(debt.id!),
+    ),
   );
 }

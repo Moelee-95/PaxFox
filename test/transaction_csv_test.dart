@@ -129,7 +129,7 @@ void main() {
           await Future<void>.delayed(const Duration(milliseconds: 300));
         });
         await tester.pumpAndSettle();
-        await tester.drag(find.byType(ListView), const Offset(0, -700));
+        await tester.drag(find.byType(ListView).first, const Offset(0, -700));
         await tester.pumpAndSettle();
         await tester.runAsync(() async {
           await tester.tap(find.text('Import transactions'));

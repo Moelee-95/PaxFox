@@ -8,24 +8,23 @@ Snapshot: 2026-10-26 / `eb4d9cf`. Start with [the short handoff](../AI_CONTEXT.m
 | --- | --- | --- |
 | Startup | `MyApp`, `lib/main.dart` | Opens store asynchronously; storage failure offers Retry without reset. Setup marker determines onboarding vs main. Original teal seed, system light/dark theme. |
 | Setup | `SetupScreen` | Currency (EUR/USD/GBP/IQD) and cash, banks or explicit no-bank, final review with optional debts. Zero cash supported; bank overdraft/block settings. Finish commits currency, accounts, debts and setup marker atomically. No partial setup writes. |
-| Main shell | `MainScreen` | Three lazy pager destinations, synchronized bottom bar and short swipe threshold; drawer and floating add menu. Lifecycle resume checks due recurring rules. |
-| Home | `HomeScreen` | Selected month; separate inner Expenses/refunds and Income tabs with their own scroll positions. These do **not** form one continuous pager with Overview. Month changes clear selection. |
-| Overview | `OverviewScreen` | Shares selected-month summary. Net, income, spending after refunds; today's wealth, spendable and blocked totals; account cards; unpaid recurring shortcut and legacy-currency notice. |
-| Cashflow | `FreedomScreen` | Missing-input state or configured projections; salary-loss scenario; opens `PlanForm`. Manual assumptions, not ledger-derived forecasts. |
+| Main shell | `MainScreen` | Three lazy pager destinations, synchronized bottom bar and short swipe threshold; drawer and floating add menu. Lifecycle resume checks due recurring rules. Back on a main destination prompts "Tap back again to exit"; a second press within 2 seconds exits. Selection and drawer views close first. Switching main destinations, opening drawer destinations or transaction forms resets the exit prompt. |
+| Home | `HomeScreen` | Selected month; three tabs: Expenses/refunds, Income and a compact info icon for Monthly overview. Expenses and Income get most of the width, with whole-unit amounts beside their labels (fractional units hidden in this header only). Standard TabBar/TabBarView taps and swipes switch between them. Monthly overview shows net cashflow and category spending with category icons; the month selector stays visible. These do **not** form one continuous pager with Overview. Month changes clear selection. |
+| Overview | `OverviewScreen` | Today's net wealth and spendable totals with large amounts and icon/title headings; compact account cards in a vertical list with wrapping names and edit actions, followed by compact red-highlighted editable debts; no redundant type captions; unpaid recurring shortcut and legacy-currency notice. |
+| Cashflow | `CashflowScreen` | Empty placeholder retained in bottom navigation for future functionality. |
 | All transactions | `TransactionsScreen` | Drawer destination inside the shell; Back restores prior main tab. All dates; case-insensitive description/category/notes search and type filter. Tap to edit, long-press to select. Filters persist across page recreation. |
-| Reports | `ReportsScreen` | Monthly income/spending/net and category spending. Displayed inside shell with pager preserved beneath; Back restores prior tab, drawer Home returns Home. |
 | Add menu | `showTransactionMenu` | Anchored to +; Add manually / Scan invoice / From gallery above an X. Translucent white modal barrier blocks background interactions. X, outside tap and Back cancel. Header scan shortcuts are removed. |
-| Manual/edit | `TransactionForm` | Visible type selection cards, description, amount, date, category, account cards, notes. Transfers get source/destination cards. Save is pinned; success returns Home. Editing supports confirmed delete, creation time and scanned-source expansion. |
-| Scan | `InvoiceScanScreen` | Auto-opens native camera, or gallery when using the floating gallery shortcut. Compact + card below pages expands to scan/gallery icons; remove/reorder pages. Preparation has a 45-second per-page timeout and cancellation. Optimizes new pages before enabling extraction. Extract/progress/cancel stay in bottom safe area. Info icon reveals guidance. Back cancels extraction. |
+| Manual/edit | `TransactionForm` | Visible type selection cards, description, amount with currency prefix, date, category, account cards, notes. Transfers get source/destination cards. Save is pinned; success returns Home. Editing supports confirmed delete, creation time and scanned-source expansion. |
+| Scan | `InvoiceScanScreen` | Auto-opens native camera, or gallery when using the floating gallery shortcut. Compact + card below pages expands to centered labeled Scan/Gallery actions; remove/reorder pages. Preparation has a 45-second per-page timeout and cancellation. Optimizes new pages before enabling extraction. Extract/progress/cancel stay in bottom safe area. Info icon reveals guidance. Back cancels extraction. |
 | Invoice review | `InvoiceReviewScreen` | Photos, merchant/category, account cards, editable items with individual dates (one shared date only for legacy single-expense receipts) and calculated total. No charged-total/adjustment/notes inputs. Conditional app-currency confirmation checkbox. Info exposes guidance/original extraction. Save all together; legacy receipt mode can edit/delete its expense. |
 | Item editor | `InvoiceItemDialog` | Dialog with item name, signed price in app currency, category and invoice date; Apply returns a reviewed item. |
-| Accounts | `AccountsScreen` -> `AccountForm` | Add/edit name, type, availability, current balance and overdraft. Add/edit/delete outstanding debts; zero records a repaid balance. Debts reduce net account wealth but do not post payments. Current balance correction adjusts opening baseline; existing opening date stays fixed. |
-| Categories | `CategoriesScreen` -> `_CategoryDialog` | Expense/income tabs; add/rename and choose stable icon. Rename cascades to matching stored labels. |
+| Accounts | `AccountsScreen` -> `AccountForm` | Add/edit name, type, availability, current balance and overdraft. Add/edit/delete outstanding debts; zero records a repaid balance. Debts reduce net account wealth but do not post payments. List/form guidance lives in header info icons. Current balance correction adjusts opening baseline; existing opening date stays fixed. |
+| Categories | `CategoriesScreen` -> `_CategoryDialog` | Expense/income tabs; add buttons at the end of each list. Guidance lives in header/editor info icons. Add/rename and choose a stable icon using a floating-label picker with a searchable, filtered lazy bottom-sheet grid of 92 curated Material icons. Rename cascades to matching stored labels. |
 | Recurring | `RecurringScreen` -> `RecurringForm` | Monthly expense/income schedules, every-N-months, account/category/day/start/end. Income Asset / expense Liability switches. Edit, pause/resume, archive; posted/failed/skipped history; retry/skip unpaid. Guidance behind info icons. |
-| Settings | `SettingsScreen` | Persist invoice extraction timeout, 30-900 seconds, default 180. Applies to next extraction. |
-| CSV | `CsvScreen` | Account/type selection, file import preview, duplicate skipping, atomic import and native export save dialog. Default account unassigned; default type expense. Success summary stays visible. |
+| Settings | `SettingsScreen` | Persist invoice extraction timeout, 30-900 seconds, default 180. Applies to next extraction; explanatory guidance is in the header info icon. |
+| CSV | `CsvScreen` | Account/type selection, file import preview, duplicate skipping, atomic import and native export save dialog. Default account unassigned; default type expense. Success summary stays visible; CSV format/import instructions live in the header info icon. |
 
-Shared forms use outlined, floating-label Material inputs in light and dark themes.
+Shared forms use outlined Material floating-label inputs and selects (labels rise on focus or when populated) in light and dark themes.
 
 Shared interaction rules: transaction selection supports select-all-visible, category/account changes and confirmed bulk deletion. Transfers are edited individually. Back/Close clears selection; navigation/month/tab/filter changes clear it. Main data pages, Accounts, Categories and Recurring support pull-down refresh, including empty lists; unsaved forms/capture drafts are not refreshed away.
 
@@ -42,7 +41,6 @@ Every production Dart file is listed once. Read a row's file only when that resp
 | `lib/core/domain/ledger_queries.dart` | `LedgerIndex`, `MonthlyLedger`, `AccountBalances`: indexed search, monthly summaries, one-pass balances. |
 | `lib/core/domain/category.dart` | `CategoryKind`, stable `CategoryIcon`, `LedgerCategory`, refund-to-expense kind mapping. |
 | `lib/core/domain/recurring.dart` | `RecurringRule`, `RecurringOccurrence`, month-end clamping and first scheduled date. |
-| `lib/core/domain/freedom.dart` | `FreedomPlan`, `FreedomProjection`, `projectFreedom`, fixed-precision `grow`. |
 | `lib/core/data/ledger_database.dart` | Open SQLite, foreign keys, schema 12, incremental migrations, indexes and category seeds. |
 | `lib/core/data/ledger_store.dart` | Public writes and complete snapshots, validation, imports, receipt lifecycle and recurring execution. Method map in [data reference](DATA_AND_WORKFLOWS.md#store-api). |
 | `lib/core/data/transaction_csv.dart` | `TransactionCsv`, `CsvPreview`, `CsvTransactionRow`; strict five-column codec, limits/date/money parsing. |
@@ -55,11 +53,11 @@ All screen files are under `lib/screens/`.
 | --- | --- |
 | `main_screen.dart` | Shell, navigation, resume checks, add/edit routing and selection orchestration. |
 | `setup_screen.dart` | Required onboarding and review. |
-| `home_screen.dart` | Month controls and expense/income browsing. |
-| `overview_screen.dart` | Monthly metrics and account balance display. |
-| `freedom_screen.dart` | Financial projection display, scenario toggle and `PlanForm`. |
+| `home_screen.dart` | Month controls, expense/income browsing and three-tab navigation including Monthly overview. |
+| `monthly_overview.dart` | Home net cashflow and sorted spending-by-category report with category icons, progress bars and refund-aware totals; tap a category to show matching expenses/refunds inline under the heading with a Back to categories button. Rows reuse Home editing, long-press selection and bulk actions; filters/month/tab changes clear selection. No separate date heading. |
+| `overview_screen.dart` | Account wealth, spendable/blocked balances and account cards; monthly reporting lives in Home. |
+| `cashflow_screen.dart` | Empty Cashflow destination; no financial logic or store dependency. |
 | `transactions_screen.dart` | Search/type controls, lazy transaction list. |
-| `reports_screen.dart` | Monthly/category report display. |
 | `transaction_form.dart` | Manual transaction validation, add/edit/delete. |
 | `transaction_bulk_editor.dart` | `TransactionBulkEditor`, typed actions, category/account dialogs and bulk commit coordination. |
 | `accounts_screen.dart` | Account list and `AccountForm`. |
@@ -88,16 +86,20 @@ Files are under `lib/core/presentation/`.
 
 | File | Ownership |
 | --- | --- |
-| `entry_type_picker.dart` | Shared visible transaction-type selection cards for manual entry, all-transactions filters, recurring and CSV. |
-| `debt_editor.dart` | Shared outstanding-debt editor for setup and Accounts; lender, balance, validation and confirmed deletion. |
-| `account_picker.dart` | Shared manual/invoice/transfer account cards; 56px normal height, numeric balance, icon, green check. Selected card moves first and scrolls into view. |
-| `account_balance_card.dart` | Overview account balance card. |
+| `entry_type_picker.dart` | Shared single-row, horizontally scrollable transaction-type cards for manual entry, all-transactions filters, recurring and CSV. |
+| `debt_editor.dart` | Shared outstanding-debt editor for setup and Accounts; lender, balance, validation and confirmed deletion; guidance behind a title info icon. |
+| `selection_cards.dart` | Shared horizontal SelectionRow and SelectionCard appearance/semantics for transaction types and payment accounts. |
+| `account_picker.dart` | Shared manual/invoice/transfer account cards; 56px normal height, numeric balance, icon, green check. Selected card moves first and scrolls into view. Borderless label/card content has no horizontal inset so it aligns with neighboring form fields. |
+| `account_balance_card.dart` | Content-sized Overview account card with wrapping name, balance and account edit action. |
+| `transaction_list.dart` | Shared lazy transaction sliver for Home expense/income and inline category browsing; shell-supplied row actions. |
 | `transaction_tile.dart` | Row appearance, semantic type colors, selection affordance and localized creation timestamp. |
 | `transaction_menu.dart` | Floating Manual/Scan/Gallery modal anchored to +. |
 | `main_drawer.dart` | Drawer destination enum, labels/icons and selection callback. |
 | `month_selector.dart` | Independent draggable month pager and animated chevrons. |
-| `metric_card.dart` | Reusable metric display. |
+| `metric_card.dart` | Icon/title heading, prominent amount and supporting detail. |
 | `responsive_pair.dart` | Two-column layout that stacks on narrow widths/large text. |
+| `category_icon_catalog.dart` | Human-readable names and category filters for the 92 stable icon IDs. |
+| `category_icon_picker.dart` | Reusable floating-label icon select; search, filters and lazy bottom-sheet grid, no external dependencies. |
 | `category_icons.dart` | Category-icon lookup and expense/income/refund/transfer colors. |
 | `bottom_action_bar.dart` | Shared safe-area save/import button, busy/disabled presentation. |
 | `confirmation_dialog.dart` | Reusable confirmed actions. |
@@ -112,11 +114,11 @@ Files are under `test/`; names below omit `.dart`.
 | --- | --- |
 | Money, balances, migrations, CRUD, accounts/categories | `ledger_test`, `account_policy_test`, `currency_debt_test` |
 | Cached totals/search/balances and snapshot lifecycle | `ledger_queries_test` |
-| Main navigation, onboarding, forms, refresh-visible UI | `widget_test`, `capture_ui_test`, `ui_changes_test` |
+| Main navigation, onboarding, forms, refresh-visible UI | `widget_test`, `capture_ui_test`, `ui_changes_test`, `monthly_home_test`, `inline_overview_test`, `clean_layout_test` |
 | Bulk changes and selection | `bulk_transactions_test` |
+| Icon catalog, search/filter/select and legacy IDs | `category_icon_picker_test` |
 | Account cards and select-last-to-start | `account_picker_test` |
 | Add overlay, dismissal, disabled background and routing | `transaction_menu_test` |
-| Financial projections/rounding | `freedom_test` |
 | Recurrence/idempotency/failure and flags/migration | `recurring_test`, `recurring_classification_test` |
 | CSV codec/database/native-adapter UI | `transaction_csv_test` |
 | Invoice domain, legacy receipts and item batches | `invoice_test`, `invoice_batch_test` |

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/data/ledger_store.dart';
+import '../core/presentation/info_button.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key, required this.store});
@@ -24,7 +25,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Settings')),
+    appBar: AppBar(
+      title: const Text('Settings'),
+      actions: const [
+        InfoButton(
+          title: 'Invoice scanning settings',
+          message: '30–900 seconds (up to 15 minutes). Default: 180. Long invoices may need more time. This limit covers image preparation, connection and Gemini extraction. Changes apply to the next extraction. Cancel and Back remain available. Gemini does not report a completion percentage for this request. The scanner shows the current stage and elapsed time instead. A timeout is still needed if the connection stalls.',
+        ),
+      ],
+    ),
     body: Form(
       key: form,
       child: ListView(
@@ -40,15 +49,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             style: Theme.of(context).textTheme.titleLarge,
           ),
           const SizedBox(height: 12),
-          const Text(
-            'Long invoices may need more time. This limit covers image preparation, connection and Gemini extraction. Changes apply to the next extraction. Cancel and Back remain available.',
-          ),
           TextFormField(
             controller: timeout,
             enabled: !saving,
             decoration: const InputDecoration(
               labelText: 'Extraction timeout (seconds)',
-              helperText: '30–900 seconds (up to 15 minutes). Default: 180.',
             ),
             keyboardType: TextInputType.number,
             validator: (s) {
@@ -59,9 +64,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
           ),
           const SizedBox(height: 16),
-          const Text(
-            'Gemini does not report a completion percentage for this request. The scanner shows the current stage and elapsed time instead. A timeout is still needed if the connection stalls.',
-          ),
           if (error != null)
             Text(
               error!,

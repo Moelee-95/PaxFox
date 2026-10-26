@@ -4,6 +4,7 @@ import '../core/data/ledger_store.dart';
 import '../core/domain/ledger.dart';
 import '../core/presentation/ledger_refresh.dart';
 import '../core/presentation/debt_editor.dart';
+import '../core/presentation/info_button.dart';
 
 class AccountsScreen extends StatelessWidget {
   const AccountsScreen({super.key, required this.store});
@@ -26,7 +27,15 @@ class AccountsScreen extends StatelessWidget {
   );
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Accounts')),
+    appBar: AppBar(
+      title: const Text('Accounts'),
+      actions: const [
+        InfoButton(
+          title: 'About accounts',
+          message: 'Blocked accounts count toward account wealth but cannot fund payments or outgoing transfers. Income can still be received into them. Tap an account to edit.',
+        ),
+      ],
+    ),
     floatingActionButton: FloatingActionButton.extended(
       onPressed: () => edit(context),
       icon: const Icon(Icons.add),
@@ -40,9 +49,6 @@ class AccountsScreen extends StatelessWidget {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
           children: [
-            const Text(
-              'Blocked accounts count toward account wealth but cannot fund payments or outgoing transfers. Income can still be received into them. Tap an account to edit.',
-            ),
             if (store.accounts.isEmpty)
               const Padding(
                 padding: EdgeInsets.all(24),
@@ -205,7 +211,15 @@ class _AccountFormState extends State<AccountForm> {
   Widget build(BuildContext context) => PopScope(
     canPop: !busy,
     child: Scaffold(
-      appBar: AppBar(title: Text(editing ? 'Edit account' : 'Add account')),
+      appBar: AppBar(
+        title: Text(editing ? 'Edit account' : 'Add account'),
+        actions: const [
+          InfoButton(
+            title: 'Account settings',
+            message: 'Balance corrections adjust the starting balance while keeping existing payments and the original starting date. Historical balances also change; corrections creating a negative protected balance are rejected. For new accounts enter the balance before payments recorded on the starting date. Cash cannot go below zero. Banks require overdraft permission to go below zero. Blocked accounts count toward wealth and can receive money but cannot fund spending or outgoing transfers.',
+          ),
+        ],
+      ),
       body: Form(
         key: form,
         child: ListView(
@@ -241,9 +255,6 @@ class _AccountFormState extends State<AccountForm> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Allow overdraft'),
-                subtitle: const Text(
-                  'Allow this bank account to go below zero.',
-                ),
                 value: overdraft,
                 onChanged: busy ? null : (v) => setState(() => overdraft = v),
               ),
@@ -272,19 +283,9 @@ class _AccountFormState extends State<AccountForm> {
                 return null;
               },
             ),
-            if (editing)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: Text(
-                  'A balance correction adjusts the starting balance and preserves all transactions. It also changes historical balances. Corrections that create a negative protected balance are rejected.',
-                ),
-              ),
             ListTile(
               contentPadding: EdgeInsets.zero,
               title: Text('Starting date: ${dayKey(asOf)}'),
-              subtitle: Text(
-                editing ? 'Original starting date is preserved.' : 'Enter the balance before payments recorded on this date.',
-              ),
               trailing: editing ? null : const Icon(Icons.calendar_today),
               onTap: editing || busy
                   ? null
@@ -304,9 +305,6 @@ class _AccountFormState extends State<AccountForm> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Blocked account'),
-                subtitle: const Text(
-                  'Included in wealth. Cannot fund spending or transfers out.',
-                ),
                 value: !available,
                 onChanged: busy ? null : (v) => setState(() => available = !v),
               ),

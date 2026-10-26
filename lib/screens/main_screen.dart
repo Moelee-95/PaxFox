@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/data/ledger_store.dart';
 import '../core/domain/ledger.dart';
@@ -14,11 +16,12 @@ import '../features/receipts/invoice_scan_screen.dart';
 import 'accounts_screen.dart';
 import 'categories_screen.dart';
 import 'csv_screen.dart';
-import 'freedom_screen.dart';
+import 'cashflow_screen.dart';
 import 'home_screen.dart';
 import 'overview_screen.dart';
 import 'recurring_screen.dart';
-import 'reports_screen.dart';
+import '../core/presentation/category_icons.dart';
+import '../core/domain/category.dart';
 import 'settings_screen.dart';
 import 'transaction_bulk_editor.dart';
 import 'transaction_form.dart';
@@ -34,14 +37,15 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   final PageController _pageController = PageController();
   final _addButtonKey = GlobalKey();
+  Timer? _exitTimer;
   bool _checkingRecurring = false;
   String? _recurringError;
   final Set<int> _selectedIds = {};
   bool _bulkBusy = false;
   int _homeTab = 0;
+  String? _homeCategory;
   int _navigationIndex = 0;
   double _swipeStartPage = 0;
-  bool _showReports = false;
   bool _showTransactions = false;
   DateTime _month = DateTime(DateTime.now().year, DateTime.now().month);
   String _searchQuery = '';
@@ -56,6 +60,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _exitTimer?.cancel();
     _pageController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -64,6 +69,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      _exitTimer?.cancel();
       _checkRecurring();
     }
   }
@@ -104,6 +110,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   });
 
   Future<void> _createTransaction() async {
+    _exitTimer?.cancel();
     final button =
         _addButtonKey.currentContext?.findRenderObject() as RenderBox?;
     if (button == null) return;
@@ -129,6 +136,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _editTransaction([LedgerEntry? entry]) async {
+    _exitTimer?.cancel();
     try {
       final receipt =
           entry?.id == null ||
@@ -171,7 +179,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   void _goHome() {
     setState(() {
-      _showReports = false;
       _showTransactions = false;
       _navigationIndex = 0;
       _month = DateTime(DateTime.now().year, DateTime.now().month);
@@ -184,10 +191,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }
 
   void _openMenu(MainMenuDestination destination) {
+    _exitTimer?.cancel();
     Navigator.pop(context);
     if (destination == MainMenuDestination.home) {
       setState(() {
-        _showReports = false;
         _showTransactions = false;
         _navigationIndex = 0;
         _selectedIds.clear();
@@ -202,15 +209,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     if (destination == MainMenuDestination.transactions) {
       setState(() {
         _showTransactions = true;
-        _showReports = false;
-        _selectedIds.clear();
-      });
-      return;
-    }
-    if (destination == MainMenuDestination.reports) {
-      setState(() {
-        _showReports = true;
-        _showTransactions = false;
         _selectedIds.clear();
       });
       return;
@@ -229,6 +227,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   List<LedgerEntry> _visibleEntries() {
     if (!_showTransactions && _navigationIndex == 0) {
       final summary = widget.store.monthSummary(_month);
+      if (_homeTab == 2) {
+        return summary.spendingEntries
+            .where((entry) => entry.category == _homeCategory)
+            .toList();
+      }
       return _homeTab == 1 ? summary.incomeEntries : summary.spendingEntries;
     }
     return widget.store.searchEntries(query: _searchQuery, type: _entryType);
@@ -236,6 +239,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   void _changeMonth(DateTime value) => setState(() {
     _month = value;
+    _homeCategory = null;
     _selectedIds.clear();
   });
 
@@ -322,19 +326,30 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     builder: (context, _) {
       final summary = widget.store.monthSummary(_month);
       return PopScope(
-        canPop:
-            !_showReports &&
-            !_showTransactions &&
-            _selectedIds.isEmpty &&
-            !_bulkBusy,
+        canPop: false,
         onPopInvokedWithResult: (didPop, result) {
           if (!didPop && _selectedIds.isNotEmpty && !_bulkBusy) {
             setState(_selectedIds.clear);
-          } else if (!didPop && (_showReports || _showTransactions)) {
+            _exitTimer?.cancel();
+          } else if (!didPop && _showTransactions) {
             setState(() {
-              _showReports = false;
               _showTransactions = false;
             });
+            _exitTimer?.cancel();
+          } else if (!didPop && !_bulkBusy) {
+            if (_exitTimer?.isActive == true) {
+              _exitTimer?.cancel();
+              SystemNavigator.pop();
+            } else {
+              _exitTimer = Timer(const Duration(seconds: 2), () {});
+              ScaffoldMessenger.of(context).hideCurrentSnackBar();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Tap back again to exit'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            }
           }
         },
         child: Scaffold(
@@ -351,8 +366,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                   ? '${_selectedIds.length} selected'
                   : _showTransactions
                   ? 'All transactions'
-                  : _showReports
-                  ? 'Reports'
                   : _navigationIndex == 1
                   ? 'Overview'
                   : 'Moneva',
@@ -375,7 +388,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           ),
           drawer: MainDrawer(
             onSelected: _openMenu,
-            showReports: _showReports,
             showTransactions: _showTransactions,
           ),
           body: LedgerRefresh(
@@ -385,14 +397,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 900),
                 child: IndexedStack(
-                  index: _showTransactions
-                      ? 2
-                      : _showReports
-                      ? 1
-                      : 0,
+                  index: _showTransactions ? 1 : 0,
                   children: [
                     TickerMode(
-                      enabled: !_showReports && !_showTransactions,
+                      enabled: !_showTransactions,
                       child: NotificationListener<ScrollStartNotification>(
                         onNotification: (notification) {
                           if (notification.depth == 0 &&
@@ -407,6 +415,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                           key: const ValueKey('main-pages'),
                           controller: _pageController,
                           onPageChanged: (index) => setState(() {
+                            _exitTimer?.cancel();
                             _navigationIndex = index;
                             _selectedIds.clear();
                           }),
@@ -418,11 +427,25 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                           itemBuilder: (context, index) => switch (index) {
                             0 => HomeScreen(
                               currency: widget.store.currency,
+                              categoryIcon: (name) => categoryIconData(
+                                widget.store
+                                        .categoriesFor(EntryType.expense)
+                                        .where((c) => c.name == name)
+                                        .firstOrNull
+                                        ?.icon ??
+                                    CategoryIcon.general,
+                              ),
                               month: _month,
                               summary: summary,
                               tab: _homeTab,
+                              selectedCategory: _homeCategory,
+                              onCategoryChanged: (category) => setState(() {
+                                _homeCategory = category;
+                                _selectedIds.clear();
+                              }),
                               onTabChanged: (tab) => setState(() {
                                 _homeTab = tab;
+                                _homeCategory = null;
                                 _selectedIds.clear();
                               }),
                               onMonthChanged: _changeMonth,
@@ -431,27 +454,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                             ),
                             1 => OverviewScreen(
                               store: widget.store,
-                              month: _month,
-                              summary: summary,
                               recurringError: _recurringError,
                               onOpenRecurring: _openRecurring,
                             ),
-                            2 => FreedomScreen(store: widget.store),
+                            2 => const CashflowScreen(),
                             _ => throw StateError('Unknown page'),
                           },
                         ),
                       ),
                     ),
-                    // Preserve pager state beneath drawer destinations.
-                    if (!_showReports) const SizedBox.shrink(),
-                    if (_showReports)
-                      ReportsScreen(
-                        month: _month,
-                        summary: summary,
-                        onMonthChanged: _changeMonth,
-                        hasLegacyCurrencyData:
-                            widget.store.hasLegacyCurrencyData,
-                      ),
                     if (_showTransactions)
                       TransactionsScreen(
                         entries: widget.store.searchEntries(
@@ -485,16 +496,16 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                   tooltip: 'Add transaction',
                   child: const Icon(Icons.add),
                 ),
-          bottomNavigationBar: _showReports || _showTransactions
+          bottomNavigationBar: _showTransactions
               ? null
               : NavigationBar(
                   selectedIndex: _navigationIndex,
                   onDestinationSelected: (index) {
+                    _exitTimer?.cancel();
                     _pageController.jumpToPage(index);
                     setState(() {
                       _selectedIds.clear();
                       _navigationIndex = index;
-                      _showReports = false;
                       _showTransactions = false;
                     });
                   },

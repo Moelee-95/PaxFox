@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../domain/ledger.dart';
+import 'selection_cards.dart';
 
 class AccountPicker extends StatefulWidget {
   const AccountPicker({
@@ -68,7 +69,6 @@ class _AccountPickerState extends State<AccountPicker> {
     );
     if (selectedIndex > 0) options.insert(0, options.removeAt(selectedIndex));
     final theme = Theme.of(context);
-    final colors = theme.colorScheme;
     return FormField<int>(
       key: ValueKey((
         widget.label,
@@ -81,117 +81,48 @@ class _AccountPickerState extends State<AccountPicker> {
         decoration: InputDecoration(
           labelText: widget.label,
           border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+          floatingLabelBehavior: FloatingLabelBehavior.always,
           errorText: field.errorText,
         ),
         child: options.isEmpty
             ? const Text('No eligible accounts. Add an account to continue.')
-            : SizedBox(
-                height:
-                    56 *
-                    MediaQuery.textScalerOf(context).scale(1).clamp(1, 1.6),
-                child: ListView.separated(
-                  controller: _scrollController,
-                  scrollDirection: Axis.horizontal,
-                  itemCount: options.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 8),
-                  itemBuilder: (context, index) {
-                    final account = options[index];
-                    final isSelected = selected == account?.id;
-                    final name = account?.name ?? 'Unassigned';
-                    return Semantics(
-                      key: ValueKey(
-                        'account-card-${account?.id ?? 'unassigned'}',
-                      ),
-                      button: true,
-                      selected: isSelected,
-                      enabled: widget.enabled,
-                      child: Material(
-                        color: isSelected
-                            ? colors.primaryContainer
-                            : colors.surfaceContainerLow,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          side: BorderSide(
-                            color: isSelected
-                                ? colors.primary
-                                : colors.outlineVariant,
-                          ),
-                        ),
-                        clipBehavior: Clip.antiAlias,
-                        child: InkWell(
-                          onTap: widget.enabled
-                              ? () {
-                                  field.didChange(account?.id);
-                                  widget.onChanged(account?.id);
-                                }
-                              : null,
-                          child: SizedBox(
-                            width: 164,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
+            : SelectionRow(
+                controller: _scrollController,
+                count: options.length,
+                itemBuilder: (context, index) {
+                  final account = options[index];
+                  return SelectionCard(
+                    key: ValueKey(
+                      'account-card-${account?.id ?? 'unassigned'}',
+                    ),
+                    selected: selected == account?.id,
+                    icon: account == null
+                        ? Icons.help_outline
+                        : account.kind == AccountKind.cash
+                        ? Icons.payments_outlined
+                        : Icons.account_balance_outlined,
+                    title: account?.name ?? 'Unassigned',
+                    subtitle: account == null
+                        ? null
+                        : FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              account.currency.format(
+                                widget.balances[account.id] ?? account.opening,
                               ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    account == null
-                                        ? Icons.help_outline
-                                        : account.kind == AccountKind.cash
-                                        ? Icons.payments_outlined
-                                        : Icons.account_balance_outlined,
-                                    size: 18,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Column(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Tooltip(
-                                          message: name,
-                                          child: Text(
-                                            name,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: theme.textTheme.labelLarge,
-                                          ),
-                                        ),
-                                        if (account != null)
-                                          FittedBox(
-                                            fit: BoxFit.scaleDown,
-                                            alignment: Alignment.centerLeft,
-                                            child: Text(
-                                              account.currency.format(
-                                                widget.balances[account.id] ??
-                                                    account.opening,
-                                              ),
-                                              style: theme.textTheme.bodySmall,
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  if (isSelected)
-                                    const Icon(
-                                      Icons.check_circle,
-                                      color: Colors.green,
-                                      size: 18,
-                                    )
-                                  else
-                                    const SizedBox(width: 18),
-                                ],
-                              ),
+                              style: theme.textTheme.bodySmall,
                             ),
                           ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
+                    onTap: widget.enabled
+                        ? () {
+                            field.didChange(account?.id);
+                            widget.onChanged(account?.id);
+                          }
+                        : null,
+                  );
+                },
               ),
       ),
     );

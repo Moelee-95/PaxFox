@@ -379,20 +379,21 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               child: _showSources
                   ? Wrap(
+                      alignment: WrapAlignment.center,
                       spacing: 10,
                       children: [
-                        IconButton.filledTonal(
+                        FilledButton.tonalIcon(
                           onPressed: busy || images.length >= 10
                               ? null
                               : () => capture(),
                           icon: const Icon(Icons.document_scanner_outlined),
-                          tooltip: 'Scan more pages',
+                          label: const Text('Scan'),
                         ),
-                        IconButton.outlined(
+                        OutlinedButton.icon(
                           onPressed: busy || images.length >= 10
                               ? null
                               : () => capture(gallery: true),
-                          tooltip: 'Gallery',
+                          label: const Text('Gallery'),
                           icon: const Icon(Icons.photo_library_outlined),
                         ),
                       ],

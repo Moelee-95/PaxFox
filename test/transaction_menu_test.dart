@@ -52,7 +52,7 @@ void main() {
       await tester.tap(find.byTooltip('Cancel adding transaction'));
       await tester.pumpAndSettle();
       expect(find.text('Add manually'), findsNothing);
-      expect(find.text('Monthly overview'), findsOneWidget);
+      expect(find.text('Account balances today'), findsOneWidget);
 
       await tester.tap(find.byTooltip('Add transaction'));
       await tester.pumpAndSettle();

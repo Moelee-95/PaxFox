@@ -1,0 +1,164 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:moneva/core/domain/ledger.dart';
+import 'package:moneva/core/domain/ledger_queries.dart';
+import 'package:moneva/core/presentation/entry_type_picker.dart';
+import 'package:moneva/core/presentation/selection_cards.dart';
+import 'package:moneva/screens/home_screen.dart';
+
+void main() {
+  testWidgets(
+    'three visible Home tabs follow the month and support normal tab taps and swipes',
+    (tester) async {
+      var month = DateTime(2026, 10);
+      var tab = 0;
+      String? selectedCategory;
+      final entries = [
+        LedgerEntry(
+          type: EntryType.income,
+          amount: 10099,
+          currency: Currency.eur,
+          date: month,
+          description: 'Salary',
+          category: 'Salary',
+        ),
+        LedgerEntry(
+          type: EntryType.expense,
+          amount: 3099,
+          currency: Currency.eur,
+          date: month,
+          description: 'Food',
+          category: 'Groceries',
+        ),
+        LedgerEntry(
+          type: EntryType.refund,
+          amount: 500,
+          currency: Currency.eur,
+          date: month,
+          description: 'Return',
+          category: 'Groceries',
+        ),
+        LedgerEntry(
+          type: EntryType.transfer,
+          amount: 1000,
+          currency: Currency.eur,
+          date: month,
+          description: 'Move',
+          category: 'Transfer',
+        ),
+      ];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (context, setState) => HomeScreen(
+                month: month,
+                summary: MonthlyLedger(
+                  entries.where((e) => e.date.month == month.month),
+                ),
+                tab: tab,
+                selectedCategory: selectedCategory,
+                onCategoryChanged: (value) =>
+                    setState(() => selectedCategory = value),
+                onTabChanged: (value) => setState(() => tab = value),
+                onMonthChanged: (value) => setState(() => month = value),
+                categoryIcon: (_) => Icons.shopping_basket_outlined,
+                tileBuilder: (entry) =>
+                    ListTile(title: Text(entry.description)),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Monthly overview'), findsOneWidget);
+      await tester.tap(find.text('Income'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Monthly overview'));
+      await tester.pumpAndSettle();
+      expect(tab, 2);
+      expect(find.text('Expenses'), findsOneWidget);
+      expect(find.text('Income'), findsOneWidget);
+      expect(find.text('Net cashflow: €75.00'), findsOneWidget);
+      expect(find.text('Groceries'), findsOneWidget);
+      expect(find.text('€25.99'), findsOneWidget);
+      expect(find.text('€25'), findsOneWidget);
+      expect(find.text('€100'), findsOneWidget);
+      expect(
+        tester.getCenter(find.text('Expenses')).dy,
+        tester.getCenter(find.text('€25')).dy,
+      );
+      expect(
+        tester.getSize(find.byType(Tab).first).width,
+        greaterThan(tester.getSize(find.byType(Tab).last).width),
+      );
+      expect(find.byIcon(Icons.shopping_basket_outlined), findsOneWidget);
+      await tester.tap(find.text('Groceries'));
+      await tester.pumpAndSettle();
+      expect(find.text('Food'), findsOneWidget);
+      expect(find.text('Return'), findsOneWidget);
+      expect(find.text('Salary'), findsNothing);
+      expect(find.text('Move'), findsNothing);
+      await tester.tap(find.byTooltip('Back to categories'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Next month'));
+      await tester.pumpAndSettle();
+      expect(find.text('Net cashflow: €0.00'), findsOneWidget);
+      expect(find.text('Groceries'), findsNothing);
+      await tester.tap(find.text('Income'));
+      await tester.pumpAndSettle();
+      expect(tab, 1);
+      expect(find.text('Income'), findsOneWidget);
+      // Standard leftward swipes advance; rightward swipes return.
+      await tester.drag(find.byType(TabBarView), const Offset(-650, 0));
+      await tester.pumpAndSettle();
+      expect(tab, 2);
+      expect(find.text('Net cashflow: €0.00'), findsOneWidget);
+      await tester.drag(find.byType(TabBarView), const Offset(650, 0));
+      await tester.pumpAndSettle();
+      expect(tab, 1);
+      await tester.drag(find.byType(TabBarView), const Offset(650, 0));
+      await tester.pumpAndSettle();
+      expect(tab, 0);
+      expect(find.byTooltip('Show monthly overview'), findsNothing);
+      expect(find.byTooltip('Back to expenses and income'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'transaction type cards stay in one horizontal row and scroll to all options',
+    (tester) async {
+      EntryType? value = EntryType.expense;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(
+                width: 320,
+                child: StatefulBuilder(
+                  builder: (context, setState) => EntryTypePicker(
+                    value: value,
+                    onChanged: (type) => setState(() => value = type),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final expense = find.byKey(const ValueKey('entry-type-expense'));
+      final income = find.byKey(const ValueKey('entry-type-income'));
+      expect(tester.getTopLeft(expense).dy, tester.getTopLeft(income).dy);
+      expect(tester.getSize(find.byType(SelectionRow)).height, 56);
+      await tester.drag(find.byType(ListView), const Offset(-600, 0));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('entry-type-transfer')));
+      await tester.pumpAndSettle();
+      expect(value, EntryType.transfer);
+      expect(tester.takeException(), isNull);
+    },
+  );
+}

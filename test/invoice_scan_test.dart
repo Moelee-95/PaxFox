@@ -122,7 +122,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Add pages'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Scan more pages'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Scan'));
       await tester.pump();
       expect(preparation.sources.single.path, 'synthetic-original.png');
       expect(find.text('Optimizing image 1 of 1'), findsOneWidget);

@@ -4,6 +4,8 @@ import '../core/data/ledger_store.dart';
 import '../core/domain/category.dart';
 import '../core/presentation/category_icons.dart';
 import '../core/presentation/ledger_refresh.dart';
+import '../core/presentation/info_button.dart';
+import '../core/presentation/category_icon_picker.dart';
 
 class CategoriesScreen extends StatelessWidget {
   const CategoriesScreen({super.key, required this.store});
@@ -15,6 +17,12 @@ class CategoriesScreen extends StatelessWidget {
     child: Scaffold(
       appBar: AppBar(
         title: const Text('Categories'),
+        actions: const [
+          InfoButton(
+            title: 'About categories',
+            message: 'Choose from these categories when adding transactions. Renaming a category also updates its existing transactions. Refunds use expense categories.',
+          ),
+        ],
         bottom: const TabBar(
           tabs: [
             Tab(text: 'Expenses'),
@@ -29,51 +37,43 @@ class CategoriesScreen extends StatelessWidget {
           builder: (context, _) => TabBarView(
             children: [
               for (final kind in CategoryKind.values)
-                Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        children: [
-                          const Text(
-                            'Choose from these categories when adding transactions. Renaming a category also updates its existing transactions. Refunds use expense categories.',
-                          ),
-                          const SizedBox(height: 12),
-                          FilledButton.icon(
-                            onPressed: () => _edit(context, kind),
-                            icon: const Icon(Icons.add),
-                            label: Text(
-                              kind == CategoryKind.expense
-                                  ? 'Add expense category'
-                                  : 'Add income category',
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: ListView.builder(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        itemCount: store.categories
-                            .where((c) => c.kind == kind)
-                            .length,
-                        itemBuilder: (context, index) {
-                          final category = store.categories
-                              .where((c) => c.kind == kind)
-                              .elementAt(index);
-                          return ListTile(
-                            leading: Icon(categoryIconData(category.icon)),
-                            title: Text(category.name),
-                            trailing: IconButton(
-                              tooltip: 'Edit ${category.name}',
-                              icon: const Icon(Icons.edit_outlined),
-                              onPressed: () => _edit(context, kind, category),
+                Builder(
+                  builder: (context) {
+                    final categories = store.categories
+                        .where((c) => c.kind == kind)
+                        .toList();
+                    return ListView.builder(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.only(bottom: 24),
+                      itemCount: categories.length + 1,
+                      itemBuilder: (context, index) {
+                        if (index == categories.length) {
+                          return Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: FilledButton.icon(
+                              onPressed: () => _edit(context, kind),
+                              icon: const Icon(Icons.add),
+                              label: Text(
+                                kind == CategoryKind.expense
+                                    ? 'Add expense category'
+                                    : 'Add income category',
+                              ),
                             ),
                           );
-                        },
-                      ),
-                    ),
-                  ],
+                        }
+                        final category = categories[index];
+                        return ListTile(
+                          leading: Icon(categoryIconData(category.icon)),
+                          title: Text(category.name),
+                          trailing: IconButton(
+                            tooltip: 'Edit ${category.name}',
+                            icon: const Icon(Icons.edit_outlined),
+                            onPressed: () => _edit(context, kind, category),
+                          ),
+                        );
+                      },
+                    );
+                  },
                 ),
             ],
           ),
@@ -159,18 +159,26 @@ class _CategoryDialogState extends State<_CategoryDialog> {
   Widget build(BuildContext context) => PopScope(
     canPop: !saving,
     child: AlertDialog(
-      title: Text(widget.category == null ? 'Add category' : 'Edit category'),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              widget.category == null ? 'Add category' : 'Edit category',
+            ),
+          ),
+          InfoButton(
+            title: 'Category information',
+            message:
+                '${widget.kind == CategoryKind.expense ? 'Expense category' : 'Income category'}. Saving updates this category on existing transactions too.',
+          ),
+        ],
+      ),
       content: Form(
         key: form,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                widget.kind == CategoryKind.expense
-                    ? 'Expense category'
-                    : 'Income category',
-              ),
               TextFormField(
                 controller: name,
                 autofocus: true,
@@ -186,30 +194,11 @@ class _CategoryDialogState extends State<_CategoryDialog> {
                   }
                 },
               ),
-              if (widget.category != null)
-                const Text(
-                  'Saving updates this category on existing transactions too.',
-                ),
-              DropdownButtonFormField<CategoryIcon>(
-                initialValue: icon,
-                decoration: const InputDecoration(labelText: 'Category icon'),
-                items: CategoryIcon.values
-                    .map(
-                      (value) => DropdownMenuItem(
-                        value: value,
-                        child: Row(
-                          children: [
-                            Icon(categoryIconData(value)),
-                            const SizedBox(width: 12),
-                            Text(value.name),
-                          ],
-                        ),
-                      ),
-                    )
-                    .toList(),
-                onChanged: saving
-                    ? null
-                    : (value) => setState(() => icon = value!),
+              const SizedBox(height: 12),
+              CategoryIconPicker(
+                value: icon,
+                enabled: !saving,
+                onChanged: (value) => setState(() => icon = value),
               ),
               if (error != null)
                 Text(

@@ -105,13 +105,13 @@ void main() {
       });
       await tester.pumpWidget(MyApp(store: store));
       await tester.pumpAndSettle();
-      expect(find.text('€13.00'), findsOneWidget);
+      expect(find.text('€13'), findsOneWidget);
       expect(
-        tester.widget<Text>(find.text('€13.00')).style?.color,
+        tester.widget<Text>(find.text('€13')).style?.color,
         Colors.red.shade700,
       );
       expect(
-        tester.widget<Text>(find.text('€30.00')).style?.color,
+        tester.widget<Text>(find.text('€30')).style?.color,
         Colors.green.shade700,
       );
       expect(find.text('Bread'), findsOneWidget);

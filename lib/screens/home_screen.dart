@@ -3,19 +3,28 @@ import 'package:flutter/material.dart';
 import '../core/domain/ledger.dart';
 import '../core/domain/ledger_queries.dart';
 import '../core/presentation/month_selector.dart';
+import 'monthly_overview.dart';
+import '../core/presentation/transaction_list.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
     required this.month,
+    this.categoryIcon = _defaultCategoryIcon,
     this.currency = Currency.eur,
     required this.summary,
     required this.tab,
     required this.onTabChanged,
     required this.onMonthChanged,
     required this.tileBuilder,
+    this.selectedCategory,
+    required this.onCategoryChanged,
   });
 
+  static IconData _defaultCategoryIcon(String _) => Icons.category_outlined;
+  final IconData Function(String) categoryIcon;
+  final String? selectedCategory;
+  final ValueChanged<String?> onCategoryChanged;
   final DateTime month;
   final Currency currency;
   final MonthlyLedger summary;
@@ -32,18 +41,17 @@ class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs;
   late int _tab;
-
   @override
   void initState() {
     super.initState();
     _tab = widget.tab;
-    _tabs = TabController(length: 2, vsync: this, initialIndex: _tab);
+    _tabs = TabController(length: 3, vsync: this, initialIndex: _tab);
     _tabs.addListener(_tabChanged);
   }
 
   void _tabChanged() {
     if (_tab == _tabs.index) return;
-    _tab = _tabs.index;
+    setState(() => _tab = _tabs.index);
     widget.onTabChanged(_tab);
   }
 
@@ -60,17 +68,24 @@ class _HomeScreenState extends State<HomeScreen>
     final income = widget.summary.incomeEntries;
     final totals = widget.summary.totalsFor(widget.currency);
     Widget list(String view, List<LedgerEntry> entries, String empty) =>
-        ListView.builder(
+        CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           key: PageStorageKey(
             'home-$view-${widget.month.year}-${widget.month.month}',
           ),
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 88),
-          itemCount: entries.isEmpty ? 1 : entries.length,
-          itemBuilder: (_, index) => entries.isEmpty
-              ? Padding(padding: const EdgeInsets.all(20), child: Text(empty))
-              : widget.tileBuilder(entries[index]),
+          slivers: [
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 88),
+              sliver: SliverTransactionList(
+                entries: entries,
+                tileBuilder: widget.tileBuilder,
+                emptyMessage: empty,
+              ),
+            ),
+          ],
         );
+    final theme = Theme.of(context);
+    final tabHeight = 48 * MediaQuery.textScalerOf(context).scale(1);
     return Column(
       children: [
         MonthSelector(month: widget.month, onChanged: widget.onMonthChanged),
@@ -78,62 +93,94 @@ class _HomeScreenState extends State<HomeScreen>
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerHigh,
+              color: theme.colorScheme.surfaceContainerHigh,
               borderRadius: BorderRadius.circular(24),
             ),
-            child: TabBar(
-              controller: _tabs,
-              padding: const EdgeInsets.all(4),
-              dividerColor: Colors.transparent,
-              indicatorSize: TabBarIndicatorSize.tab,
-              indicator: BoxDecoration(
-                color: Theme.of(context).colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              labelColor: Theme.of(context).colorScheme.onSurface,
-              unselectedLabelColor: Theme.of(context)
-                  .colorScheme
-                  .onSurfaceVariant,
-              splashBorderRadius: BorderRadius.circular(20),
-              tabs: [
-                for (final tab in [
-                  (
-                    label: 'Expenses',
-                    amount: totals.spending,
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? Colors.red.shade300
-                        : Colors.red.shade700,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                const infoWidth = 48.0;
+                final moneyTabWidth =
+                    (constraints.maxWidth - 8 - infoWidth) / 2;
+                return TabBar(
+                  controller: _tabs,
+                  isScrollable: true,
+                  tabAlignment: TabAlignment.start,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(4),
+                  labelPadding: EdgeInsets.zero,
+                  dividerColor: Colors.transparent,
+                  indicatorSize: TabBarIndicatorSize.tab,
+                  indicator: BoxDecoration(
+                    color: theme.colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                  (
-                    label: 'Income',
-                    amount: totals.income,
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? Colors.green.shade400
-                        : Colors.green.shade700,
-                  ),
-                ])
-                  Tab(
-                    height: 48 * MediaQuery.textScalerOf(context).scale(1),
-                    child: Wrap(
-                      alignment: WrapAlignment.center,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      spacing: 6,
-                      children: [
-                        Text(
-                          tab.label,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        Text(
-                          widget.currency.display(tab.amount),
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: tab.color,
+                  labelColor: theme.colorScheme.onSurface,
+                  unselectedLabelColor: theme.colorScheme.onSurfaceVariant,
+                  splashBorderRadius: BorderRadius.circular(20),
+                  tabs: [
+                    for (final tab in [
+                      (
+                        label: 'Expenses',
+                        amount: totals.spending,
+                        color: theme.brightness == Brightness.dark
+                            ? Colors.red.shade300
+                            : Colors.red.shade700,
+                      ),
+                      (
+                        label: 'Income',
+                        amount: totals.income,
+                        color: theme.brightness == Brightness.dark
+                            ? Colors.green.shade400
+                            : Colors.green.shade700,
+                      ),
+                    ])
+                      SizedBox(
+                        width: moneyTabWidth,
+                        child: Tab(
+                          height: tabHeight,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    tab.label,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '${widget.currency.symbol}${tab.amount ~/ widget.currency.scale}',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      color: tab.color,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
-                      ],
+                      ),
+                    SizedBox(
+                      width: infoWidth,
+                      child: Tab(
+                        height: tabHeight,
+                        child: const Tooltip(
+                          message: 'Monthly overview',
+                          child: Icon(
+                            Icons.info_outline,
+                            semanticLabel: 'Monthly overview',
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-              ],
+                  ],
+                );
+              },
             ),
           ),
         ),
@@ -150,6 +197,14 @@ class _HomeScreenState extends State<HomeScreen>
                 'income',
                 income,
                 'No income in this month. Tap + to add one.',
+              ),
+              MonthlyOverview(
+                summary: widget.summary,
+                currency: widget.currency,
+                categoryIcon: widget.categoryIcon,
+                selectedCategory: widget.selectedCategory,
+                onCategoryChanged: widget.onCategoryChanged,
+                tileBuilder: widget.tileBuilder,
               ),
             ],
           ),

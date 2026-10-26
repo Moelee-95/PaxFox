@@ -117,8 +117,15 @@ void main() {
       expect(store.currentBalances.available, 100123);
       await tester.tap(find.text('Overview'));
       await tester.pumpAndSettle();
-      expect(find.text('Account wealth: IQD 80.122'), findsOneWidget);
+      expect(find.text('Account wealth'), findsOneWidget);
       await preview(tester, 'overview-debt');
+      await tester.tap(find.text('Home'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Monthly overview'));
+      await tester.pumpAndSettle();
+      await preview(tester, 'home-monthly-overview');
+      await tester.tap(find.text('Overview'));
+      await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Open menu'));
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(ListTile, 'Accounts'));
