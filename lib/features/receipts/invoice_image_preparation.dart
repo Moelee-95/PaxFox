@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
@@ -48,7 +49,7 @@ class InvoiceImagePreparation {
   static final _prepared = Expando<Uint8List>('Prepared invoice image bytes');
   final _files = <File>[];
   Future<Directory>? _directory;
-  Future<File>? _pending;
+  final _pending = <Future<File>>{};
   bool _disposed = false;
   int _nextPage = 0;
 
@@ -58,12 +59,49 @@ class InvoiceImagePreparation {
     if (await file.length() > maxInvoiceSourceBytes) {
       throw const FormatException('An image is too large (25 MB limit).');
     }
-    return compute(prepareInvoiceImage, await file.readAsBytes());
+    var bytes = await file.readAsBytes();
+    // Downsample oversized camera photos in the native codec before the Dart
+    // JPEG encoder. Decoding full-resolution scans in Dart can take minutes.
+    final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+    ui.ImageDescriptor? descriptor;
+    ui.Codec? codec;
+    ui.Image? image;
+    try {
+      descriptor = await ui.ImageDescriptor.encoded(buffer);
+      final scale = math.min(
+        1.0,
+        math.min(
+          2000 / math.min(descriptor.width, descriptor.height),
+          6000 / math.max(descriptor.width, descriptor.height),
+        ),
+      );
+      if (scale < 1) {
+        codec = await descriptor.instantiateCodec(
+          targetWidth: math.max(1, (descriptor.width * scale).round()),
+          targetHeight: math.max(1, (descriptor.height * scale).round()),
+        );
+        image = (await codec.getNextFrame()).image;
+        final data = await image.toByteData(format: ui.ImageByteFormat.png);
+        if (data == null) throw const FormatException('Cannot read image.');
+        bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+      }
+    } catch (_) {
+      throw const FormatException('Unsupported invoice image.');
+    } finally {
+      image?.dispose();
+      codec?.dispose();
+      descriptor?.dispose();
+      buffer.dispose();
+    }
+    return compute(prepareInvoiceImage, bytes);
   }
 
   Future<File> prepare(File source) {
     if (_disposed) throw StateError('Image preparation has been closed.');
-    return _pending = _prepare(source);
+    late final Future<File> task;
+    task = _prepare(source).whenComplete(() => _pending.remove(task));
+    _pending.add(task);
+    return task;
   }
 
   Future<File> _prepare(File source) async {
@@ -95,7 +133,7 @@ class InvoiceImagePreparation {
   Future<void> dispose() async {
     _disposed = true;
     try {
-      await _pending;
+      await Future.wait(_pending.toList(), eagerError: false);
     } catch (_) {
       /* Cleanup also follows failed preparation. */
     }

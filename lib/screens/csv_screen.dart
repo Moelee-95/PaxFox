@@ -5,6 +5,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../core/presentation/entry_type_picker.dart';
+
 import '../core/data/ledger_store.dart';
 import '../core/data/transaction_csv.dart';
 import '../core/domain/ledger.dart';
@@ -38,8 +40,13 @@ Future<bool> saveCsvFile(String name, Uint8List bytes) async =>
     null;
 
 CsvPreview _decodeCsv(
-  ({Uint8List bytes, EntryType? type, int? accountId}) input,
-) => TransactionCsv.decode(input.bytes, input.type, input.accountId);
+  ({Uint8List bytes, EntryType? type, int? accountId, Currency currency}) input,
+) => TransactionCsv.decode(
+  input.bytes,
+  input.type,
+  input.accountId,
+  currency: input.currency,
+);
 
 class CsvScreen extends StatefulWidget {
   const CsvScreen({
@@ -98,6 +105,7 @@ class _CsvScreenState extends State<CsvScreen> {
     if (file == null) return;
     final parsed = await compute(_decodeCsv, (
       bytes: file!.bytes,
+      currency: widget.store.currency,
       type: type,
       accountId: accountId,
     ));
@@ -119,7 +127,7 @@ class _CsvScreenState extends State<CsvScreen> {
         widget.store.entries
             .where(
               (e) =>
-                  e.currency == Currency.eur &&
+                  e.currency == widget.store.currency &&
                   e.type == (type ?? EntryType.expense) &&
                   e.accountId == accountId,
             )
@@ -191,7 +199,9 @@ class _CsvScreenState extends State<CsvScreen> {
                   '${dayKey(e.date)} · ${e.category}'
                   '${e.notes.isEmpty ? '' : '\n${e.notes}'}${rowError ? '\n$error' : ''}',
                 ),
-                trailing: Text('€${Currency.eur.format(e.amount)}'),
+                trailing: Text(
+                  '${widget.store.currency.symbol}${widget.store.currency.format(e.amount)}',
+                ),
               ),
             );
           }
@@ -204,7 +214,7 @@ class _CsvScreenState extends State<CsvScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Example: 1.10.26, Bank Fee, Service, €4.95.\n'
+                'Example: 1.10.26, Bank Fee, Service, 4.95.\n'
                 'Account and type are optional. Unassigned expenses count in transactions and reports without changing account balances. '
                 'Leaving the type unset treats rows as expenses. All dates are included in exports. '
                 'Transfers require two accounts and are not supported by this five-column format.',
@@ -230,29 +240,12 @@ class _CsvScreenState extends State<CsvScreen> {
                       },
               ),
               const SizedBox(height: 12),
-              DropdownButtonFormField<EntryType>(
-                initialValue: type,
-                hint: const Text('Not selected (expense)'),
-                decoration: const InputDecoration(
-                  labelText: 'Transaction type',
-                ),
-                items: const [
-                  DropdownMenuItem<EntryType>(
-                    value: null,
-                    child: Text('Not selected (expense)'),
-                  ),
-                  DropdownMenuItem(
-                    value: EntryType.expense,
-                    child: Text('Expense'),
-                  ),
-                  DropdownMenuItem(
-                    value: EntryType.income,
-                    child: Text('Income'),
-                  ),
-                  DropdownMenuItem(
-                    value: EntryType.refund,
-                    child: Text('Refund'),
-                  ),
+              EntryTypePicker(
+                value: type ?? EntryType.expense,
+                types: const [
+                  EntryType.expense,
+                  EntryType.income,
+                  EntryType.refund,
                 ],
                 onChanged: busy
                     ? null
@@ -325,7 +318,7 @@ class _CsvScreenState extends State<CsvScreen> {
               if (data != null) ...[
                 const SizedBox(height: 12),
                 Text(
-                  '${rows.length} valid rows · €${Currency.eur.format(rows.fold<int>(0, (total, row) => total + row.entry.amount))}',
+                  '${rows.length} valid rows · ${widget.store.currency.symbol}${widget.store.currency.format(rows.fold<int>(0, (total, row) => total + row.entry.amount))}',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 if (data.errors.isNotEmpty) ...[

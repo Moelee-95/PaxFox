@@ -219,7 +219,7 @@ class _PlanFormState extends State<PlanForm> {
   void initState() {
     super.initState();
     final plan = widget.store.plan;
-    currency = plan?.currency ?? Currency.eur;
+    currency = plan?.currency ?? widget.store.currency;
     start = plan?.start ?? DateTime(DateTime.now().year, DateTime.now().month);
     final values = plan?.toMap();
     for (final key in moneyLabels.keys) {
@@ -268,7 +268,7 @@ class _PlanFormState extends State<PlanForm> {
           const Text(
             'Fill every balance and income explicitly; enter 0 when known to be zero. 4% withdrawal is an editable illustration. This model uses no live market data.',
           ),
-          const Text('Currency: €'),
+          Text('Currency: ${currency.code}'),
           ListTile(
             title: Text('Forecast start: ${dayKey(start)}'),
             onTap: () async {
@@ -284,48 +284,54 @@ class _PlanFormState extends State<PlanForm> {
             },
           ),
           for (final entry in moneyLabels.entries)
-            TextFormField(
-              controller: fields[entry.key],
-              decoration: InputDecoration(labelText: entry.value),
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              validator: (s) {
-                try {
-                  final n = currency.parse(s ?? '');
-                  if (entry.key == 'spending' && n <= 0) {
-                    return 'Target spending must be positive.';
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: TextFormField(
+                controller: fields[entry.key],
+                decoration: InputDecoration(labelText: entry.value),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                validator: (s) {
+                  try {
+                    final n = currency.parse(s ?? '');
+                    if (entry.key == 'spending' && n <= 0) {
+                      return 'Target spending must be positive.';
+                    }
+                  } on FormatException catch (e) {
+                    return e.message;
                   }
-                } on FormatException catch (e) {
-                  return e.message;
-                }
-                return null;
-              },
+                  return null;
+                },
+              ),
             ),
           for (final entry in rateLabels.entries)
-            TextFormField(
-              controller: fields[entry.key],
-              decoration: InputDecoration(labelText: entry.value),
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-                signed: true,
-              ),
-              validator: (_) {
-                try {
-                  final n = rate(entry.key);
-                  final minimum = entry.key == 'withdrawalBps'
-                      ? 1
-                      : entry.key == 'inflationBps'
-                      ? 0
-                      : -10000;
-                  if (n < minimum || n > 10000) {
-                    return 'Use ${minimum / 100} to 100 percent.';
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: TextFormField(
+                controller: fields[entry.key],
+                decoration: InputDecoration(labelText: entry.value),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                  signed: true,
+                ),
+                validator: (_) {
+                  try {
+                    final n = rate(entry.key);
+                    final minimum = entry.key == 'withdrawalBps'
+                        ? 1
+                        : entry.key == 'inflationBps'
+                        ? 0
+                        : -10000;
+                    if (n < minimum || n > 10000) {
+                      return 'Use ${minimum / 100} to 100 percent.';
+                    }
+                  } on FormatException catch (e) {
+                    return e.message;
                   }
-                } on FormatException catch (e) {
-                  return e.message;
-                }
-                return null;
-              },
+                  return null;
+                },
+              ),
             ),
           TextFormField(
             controller: fields['years'],

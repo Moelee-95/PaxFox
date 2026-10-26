@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/data/ledger_store.dart';
 import '../core/domain/ledger.dart';
 import '../core/presentation/ledger_refresh.dart';
+import '../core/presentation/debt_editor.dart';
 
 class AccountsScreen extends StatelessWidget {
   const AccountsScreen({super.key, required this.store});
@@ -11,6 +12,16 @@ class AccountsScreen extends StatelessWidget {
     context,
     MaterialPageRoute<void>(
       builder: (_) => AccountForm(store: store, account: account),
+    ),
+  );
+  Future<void> editDebt(BuildContext context, [Debt? debt]) => showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => DebtEditor(
+      currency: store.currency,
+      debt: debt,
+      onSave: store.saveDebt,
+      onDelete: debt == null ? null : () => store.deleteDebt(debt.id!),
     ),
   );
   @override
@@ -53,7 +64,7 @@ class AccountsScreen extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        '€${a.currency.format(store.currentBalances.byAccount[a.id] ?? a.opening)}',
+                        '${a.currency.symbol}${a.currency.format(store.currentBalances.byAccount[a.id] ?? a.opening)}',
                       ),
                       const SizedBox(width: 8),
                       const Icon(Icons.edit_outlined),
@@ -61,6 +72,26 @@ class AccountsScreen extends StatelessWidget {
                   ),
                 ),
               ),
+            const SizedBox(height: 24),
+            Text('Debts', style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              'Outstanding: ${store.currency.display(store.totalDebt)} · Net wealth: ${store.currency.display(store.netWealth)}',
+            ),
+            for (final debt in store.debts)
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.account_balance_outlined),
+                  title: Text(debt.name),
+                  subtitle: const Text('Outstanding liability'),
+                  trailing: Text(store.currency.display(debt.amount)),
+                  onTap: () => editDebt(context, debt),
+                ),
+              ),
+            OutlinedButton.icon(
+              onPressed: () => editDebt(context),
+              icon: const Icon(Icons.add),
+              label: const Text('Add debt'),
+            ),
           ],
         ),
       ),
@@ -93,7 +124,7 @@ class _AccountFormState extends State<AccountForm> {
     balance = TextEditingController(
       text: a == null
           ? '0'
-          : Currency.eur.format(
+          : widget.store.currency.format(
               widget.store.currentBalances.byAccount[a.id] ?? a.opening,
             ),
     );
@@ -112,7 +143,7 @@ class _AccountFormState extends State<AccountForm> {
 
   int amount() {
     final input = balance.text.trim();
-    return Currency.eur.parse(input.replaceFirst(RegExp(r'^-'), '')) *
+    return widget.store.currency.parse(input.replaceFirst(RegExp(r'^-'), '')) *
         (input.startsWith('-') ? -1 : 1);
   }
 
@@ -137,7 +168,7 @@ class _AccountFormState extends State<AccountForm> {
       final account = Account(
         id: old?.id,
         name: name.text.trim(),
-        currency: Currency.eur,
+        currency: widget.store.currency,
         opening: opening,
         asOf: asOf,
         kind: kind,
@@ -187,7 +218,8 @@ class _AccountFormState extends State<AccountForm> {
               validator: (s) =>
                   s == null || s.trim().isEmpty ? 'Enter a name.' : null,
             ),
-            const Text('Currency: €'),
+            Text('Currency: ${widget.store.currency.code}'),
+            const SizedBox(height: 16),
             DropdownButtonFormField<AccountKind>(
               initialValue: kind,
               decoration: const InputDecoration(labelText: 'Account type'),
@@ -215,13 +247,14 @@ class _AccountFormState extends State<AccountForm> {
                 value: overdraft,
                 onChanged: busy ? null : (v) => setState(() => overdraft = v),
               ),
+            const SizedBox(height: 16),
             TextFormField(
               controller: balance,
               enabled: !busy,
               decoration: InputDecoration(
                 labelText: editing
-                    ? 'Current balance (€)'
-                    : 'Starting balance (€)',
+                    ? 'Current balance (${widget.store.currency.symbol.trim()})'
+                    : 'Starting balance (${widget.store.currency.symbol.trim()})',
               ),
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,

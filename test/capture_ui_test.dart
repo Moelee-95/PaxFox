@@ -205,8 +205,15 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.textContaining('Capture all pages'), findsNothing);
-      expect(find.byTooltip('Scan more pages'), findsOneWidget);
-      expect(find.byTooltip('Gallery'), findsOneWidget);
+      expect(find.byTooltip('Scan more pages'), findsNothing);
+      expect(find.byTooltip('Gallery'), findsNothing);
+      // Sources sit in a compact card after the page list.
+      await tester.scrollUntilVisible(
+        find.text('Add pages'),
+        500,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(find.text('Add pages'), findsOneWidget);
       expect(tester.getBottomRight(find.text('Extract')).dy, lessThan(652));
       await tester.tap(find.text('Extract'));
       await tester.pump();

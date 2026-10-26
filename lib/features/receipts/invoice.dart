@@ -10,11 +10,22 @@ class InvoiceItem {
     this.category,
     this.unitPrice,
     this.edited = false,
+    this.date,
   });
   final String description, quantity;
   final int? total, unitPrice;
   final String? category;
   final bool edited;
+  final DateTime? date;
+  InvoiceItem withDate(DateTime? value) => InvoiceItem(
+    description: description,
+    quantity: quantity,
+    total: total,
+    category: category,
+    unitPrice: unitPrice,
+    edited: edited,
+    date: value,
+  );
   Map<String, Object?> toMap() => {
     'description': description,
     'quantity': quantity,
@@ -22,6 +33,7 @@ class InvoiceItem {
     'unit_price': unitPrice,
     'category': category,
     'edited': edited ? 1 : 0,
+    'date': date == null ? null : dayKey(date!),
   };
   factory InvoiceItem.fromMap(Map<String, dynamic> row) => InvoiceItem(
     description: row['description'] as String? ?? '',
@@ -30,12 +42,14 @@ class InvoiceItem {
     unitPrice: row['unit_price'] as int?,
     category: row['category'] as String?,
     edited: row['edited'] == 1,
+    date: invoiceDate(row['date'] ?? row['item_date']),
   );
 }
 
 class InvoiceDraft {
   const InvoiceDraft({
     this.merchant = '',
+    this.multipleInvoices = false,
     this.date,
     this.currency,
     this.total,
@@ -46,12 +60,14 @@ class InvoiceDraft {
     this.raw = '',
   });
   final String merchant, adjustmentNote, raw;
+  final bool multipleInvoices;
   final DateTime? date;
   final String? currency, category;
   final int? total, adjustment;
   final List<InvoiceItem> items;
   Map<String, Object?> toMap() => {
     'merchant': merchant,
+    'multiple_invoices': multipleInvoices,
     'date': date == null ? null : dayKey(date!),
     'currency': currency,
     'total': total,
@@ -63,6 +79,7 @@ class InvoiceDraft {
   };
   factory InvoiceDraft.fromMap(Map<String, dynamic> row) => InvoiceDraft(
     merchant: row['merchant'] as String? ?? '',
+    multipleInvoices: row['multiple_invoices'] == true,
     date: row['date'] == null ? null : DateTime.parse(row['date'] as String),
     currency: row['currency'] as String?,
     total: row['total'] as int?,
@@ -76,13 +93,13 @@ class InvoiceDraft {
   );
 }
 
-int? extractedMoney(dynamic input) {
+int? extractedMoney(dynamic input, {Currency currency = Currency.eur}) {
   if (input is! String) {
     return null;
   }
   try {
     final negative = input.startsWith('-');
-    return Currency.eur.parse(negative ? input.substring(1) : input) *
+    return currency.parse(negative ? input.substring(1) : input) *
         (negative ? -1 : 1);
   } on FormatException {
     return null;
@@ -97,7 +114,11 @@ DateTime? invoiceDate(dynamic input) {
   return date != null && dayKey(date) == input ? date : null;
 }
 
-InvoiceDraft parseInvoice(String raw, Set<String> categories) {
+InvoiceDraft parseInvoice(
+  String raw,
+  Set<String> categories, {
+  Currency currency = Currency.eur,
+}) {
   var text = raw
       .trim()
       .replaceFirst(RegExp(r'^```(?:json)?\s*'), '')
@@ -112,10 +133,11 @@ InvoiceDraft parseInvoice(String raw, Set<String> categories) {
       value is String && categories.contains(value) ? value : null;
   return InvoiceDraft(
     merchant: json['merchant'] is String ? json['merchant'] as String : '',
+    multipleInvoices: json['multiple_invoices'] == true,
     date: invoiceDate(json['date']),
     currency: json['currency'] as String?,
-    total: extractedMoney(json['total']),
-    adjustment: extractedMoney(json['adjustment']),
+    total: extractedMoney(json['total'], currency: currency),
+    adjustment: extractedMoney(json['adjustment'], currency: currency),
     adjustmentNote: json['adjustment_note'] as String? ?? '',
     category: category(json['category']),
     raw: raw,
@@ -124,9 +146,14 @@ InvoiceDraft parseInvoice(String raw, Set<String> categories) {
       return InvoiceItem(
         description: item['description'] as String? ?? '',
         quantity: item['quantity'] as String? ?? '',
-        total: extractedMoney(item['line_total']),
-        unitPrice: extractedMoney(item['unit_price']),
+        total: extractedMoney(item['line_total'], currency: currency),
+        unitPrice: extractedMoney(item['unit_price'], currency: currency),
         category: category(item['category']),
+        date:
+            invoiceDate(item['date']) ??
+            (json['multiple_invoices'] == true
+                ? null
+                : invoiceDate(json['date'])),
       );
     }).toList(),
   );
@@ -161,6 +188,7 @@ List<InvoiceItem> expandInvoiceItems(List<InvoiceItem> items) {
           total: price,
           category: item.category,
           edited: item.edited,
+          date: item.date,
         ),
       );
     }
@@ -174,7 +202,7 @@ String? invoiceItemError(InvoiceItem item, Set<String> categories) {
     errors.add('Enter an item name.');
   }
   if (item.total == null || item.total!.abs() > 9000000000000000) {
-    errors.add('Enter a valid price in EUR.');
+    errors.add('Enter a valid price.');
   }
   if (!categories.contains(item.category)) {
     errors.add('Select an available expense category.');
@@ -182,16 +210,22 @@ String? invoiceItemError(InvoiceItem item, Set<String> categories) {
   return errors.isEmpty ? null : errors.join('\n');
 }
 
-void validateInvoice(InvoiceDraft draft, Set<String> categories) {
-  if (draft.currency != 'EUR' ||
-      draft.date == null ||
+void validateInvoice(
+  InvoiceDraft draft,
+  Set<String> categories, {
+  Currency currency = Currency.eur,
+}) {
+  if (draft.currency != currency.code ||
+      ((draft.multipleInvoices || draft.date == null) &&
+          draft.items.any((item) => item.date == null)) ||
+      (draft.date == null && (draft.adjustment ?? 0) != 0) ||
       draft.merchant.trim().isEmpty ||
       draft.total == null ||
       draft.total! <= 0 ||
       !categories.contains(draft.category) ||
       draft.items.isEmpty) {
     throw ArgumentError(
-      'Review merchant, date, EUR total, category and items.',
+      'Review merchant, item dates, total, currency, category and items.',
     );
   }
   var sum = 0;

@@ -35,13 +35,18 @@ class TransactionCsv {
           '${e.date.day}.${e.date.month}.${e.date.year >= 2000 && e.date.year <= 2099 ? (e.date.year % 100).toString().padLeft(2, '0') : e.date.year.toString().padLeft(4, '0')}',
           e.description,
           e.category,
-          '\u20ac${Currency.eur.format(e.amount)}',
+          e.currency.display(e.amount),
           e.notes,
         ],
     ]);
   }
 
-  static CsvPreview decode(List<int> bytes, EntryType? type, int? accountId) {
+  static CsvPreview decode(
+    List<int> bytes,
+    EntryType? type,
+    int? accountId, {
+    Currency currency = Currency.eur,
+  }) {
     if (bytes.length > maxBytes) {
       throw const FormatException('Choose a CSV smaller than 5 MB.');
     }
@@ -112,8 +117,8 @@ class TransactionCsv {
             number: i + 1,
             entry: LedgerEntry(
               type: type ?? EntryType.expense,
-              amount: parseCost(fields[3]),
-              currency: Currency.eur,
+              amount: parseCost(fields[3], currency: currency),
+              currency: currency,
               date: parseDate(fields[0]),
               description: fields[1].trim(),
               category: fields[2].trim(),
@@ -157,26 +162,38 @@ class TransactionCsv {
     return date;
   }
 
-  static int parseCost(String text) {
+  static int parseCost(String text, {Currency currency = Currency.eur}) {
     var value = text
         .trim()
-        .replaceFirst(RegExp(r'^(?:\u20ac|EUR)\s*', caseSensitive: false), '')
-        .replaceFirst(RegExp(r'\s*(?:\u20ac|EUR)$', caseSensitive: false), '')
+        .replaceFirst(
+          RegExp(
+            '^(?:${RegExp.escape(currency.symbol.trim())}|${currency.code})\\s*',
+            caseSensitive: false,
+          ),
+          '',
+        )
+        .replaceFirst(
+          RegExp(
+            '\\s*(?:${RegExp.escape(currency.symbol.trim())}|${currency.code})\$',
+            caseSensitive: false,
+          ),
+          '',
+        )
         .trim();
     // Accept plain decimals and explicitly grouped German/English amounts.
-    if (RegExp(r'^\d{1,3}(?:\.\d{3})+,\d{1,2}$').hasMatch(value)) {
+    if (RegExp('^\\d{1,3}(?:\\.\\d{3})+,\\d{1,${currency.exponent}}\$')
+        .hasMatch(value)) {
       value = value.replaceAll('.', '').replaceAll(',', '.');
-    } else if (RegExp(r'^\d{1,3}(?:,\d{3})+\.\d{1,2}$').hasMatch(value)) {
+    } else if (RegExp('^\\d{1,3}(?:,\\d{3})+\\.\\d{1,${currency.exponent}}\$')
+        .hasMatch(value)) {
       value = value.replaceAll(',', '');
     }
     try {
-      final amount = Currency.eur.parse(value);
+      final amount = currency.parse(value);
       if (amount > 0) return amount;
     } on FormatException {
       // Use the same field-specific message for malformed and zero values.
     }
-    throw const FormatException(
-      'Cost must be a positive EUR amount, e.g. \u20ac4.95 or 4,95.',
-    );
+    throw FormatException('Cost must be a positive ${currency.code} amount.');
   }
 }

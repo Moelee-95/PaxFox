@@ -69,5 +69,5 @@ class TransactionTile extends StatelessWidget {
 String creationTimestamp(BuildContext context, DateTime timestamp) {
   final local = timestamp.toLocal();
   final locale = MaterialLocalizations.of(context);
-  return '${locale.formatCompactDate(local)} ${locale.formatTimeOfDay(TimeOfDay.fromDateTime(local), alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context))}';
+  return '${locale.formatCompactDate(local)} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}:${local.second.toString().padLeft(2, '0')}';
 }

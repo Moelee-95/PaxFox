@@ -40,7 +40,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   bool _bulkBusy = false;
   int _homeTab = 0;
   int _navigationIndex = 0;
+  double _swipeStartPage = 0;
   bool _showReports = false;
+  bool _showTransactions = false;
   DateTime _month = DateTime(DateTime.now().year, DateTime.now().month);
   String _searchQuery = '';
   EntryType? _entryType;
@@ -117,7 +119,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     final saved = await Navigator.push<bool>(
       context,
       MaterialPageRoute<bool>(
-        builder: (_) => InvoiceScanScreen(store: widget.store),
+        builder: (_) => InvoiceScanScreen(
+          store: widget.store,
+          initialGallery: action == TransactionCreation.gallery,
+        ),
       ),
     );
     if (saved == true && mounted) _goHome();
@@ -167,6 +172,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void _goHome() {
     setState(() {
       _showReports = false;
+      _showTransactions = false;
       _navigationIndex = 0;
       _month = DateTime(DateTime.now().year, DateTime.now().month);
     });
@@ -182,6 +188,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     if (destination == MainMenuDestination.home) {
       setState(() {
         _showReports = false;
+        _showTransactions = false;
         _navigationIndex = 0;
         _selectedIds.clear();
       });
@@ -192,9 +199,18 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       });
       return;
     }
+    if (destination == MainMenuDestination.transactions) {
+      setState(() {
+        _showTransactions = true;
+        _showReports = false;
+        _selectedIds.clear();
+      });
+      return;
+    }
     if (destination == MainMenuDestination.reports) {
       setState(() {
         _showReports = true;
+        _showTransactions = false;
         _selectedIds.clear();
       });
       return;
@@ -211,7 +227,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }
 
   List<LedgerEntry> _visibleEntries() {
-    if (_navigationIndex == 0) {
+    if (!_showTransactions && _navigationIndex == 0) {
       final summary = widget.store.monthSummary(_month);
       return _homeTab == 1 ? summary.incomeEntries : summary.spendingEntries;
     }
@@ -306,12 +322,19 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     builder: (context, _) {
       final summary = widget.store.monthSummary(_month);
       return PopScope(
-        canPop: !_showReports && _selectedIds.isEmpty && !_bulkBusy,
+        canPop:
+            !_showReports &&
+            !_showTransactions &&
+            _selectedIds.isEmpty &&
+            !_bulkBusy,
         onPopInvokedWithResult: (didPop, result) {
           if (!didPop && _selectedIds.isNotEmpty && !_bulkBusy) {
             setState(_selectedIds.clear);
-          } else if (!didPop && _showReports) {
-            setState(() => _showReports = false);
+          } else if (!didPop && (_showReports || _showTransactions)) {
+            setState(() {
+              _showReports = false;
+              _showTransactions = false;
+            });
           }
         },
         child: Scaffold(
@@ -326,6 +349,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             title: Text(
               _selectedIds.isNotEmpty
                   ? '${_selectedIds.length} selected'
+                  : _showTransactions
+                  ? 'All transactions'
                   : _showReports
                   ? 'Reports'
                   : _navigationIndex == 1
@@ -348,7 +373,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                     ),
                   ),
           ),
-          drawer: MainDrawer(onSelected: _openMenu, showReports: _showReports),
+          drawer: MainDrawer(
+            onSelected: _openMenu,
+            showReports: _showReports,
+            showTransactions: _showTransactions,
+          ),
           body: LedgerRefresh(
             store: widget.store,
             child: Align(
@@ -356,59 +385,65 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 900),
                 child: IndexedStack(
-                  index: _showReports ? 1 : 0,
+                  index: _showTransactions
+                      ? 2
+                      : _showReports
+                      ? 1
+                      : 0,
                   children: [
                     TickerMode(
-                      enabled: !_showReports,
-                      child: PageView.builder(
-                        key: const ValueKey('main-pages'),
-                        controller: _pageController,
-                        onPageChanged: (index) => setState(() {
-                          _navigationIndex = index;
-                          _selectedIds.clear();
-                        }),
-                        itemCount: 4,
-                        itemBuilder: (context, index) => switch (index) {
-                          0 => HomeScreen(
-                            month: _month,
-                            summary: summary,
-                            tab: _homeTab,
-                            onTabChanged: (tab) => setState(() {
-                              _homeTab = tab;
-                              _selectedIds.clear();
-                            }),
-                            onMonthChanged: _changeMonth,
-                            tileBuilder: (entry) =>
-                                _transactionTile(entry, compact: true),
-                          ),
-                          1 => OverviewScreen(
-                            store: widget.store,
-                            month: _month,
-                            summary: summary,
-                            recurringError: _recurringError,
-                            onOpenRecurring: _openRecurring,
-                          ),
-                          2 => FreedomScreen(store: widget.store),
-                          _ => TransactionsScreen(
-                            entries: widget.store.searchEntries(
-                              query: _searchQuery,
-                              type: _entryType,
-                            ),
-                            search: _searchQuery,
-                            type: _entryType,
-                            onSearchChanged: (value) => setState(() {
-                              _searchQuery = value;
-                              _selectedIds.clear();
-                            }),
-                            onTypeChanged: (value) => setState(() {
-                              _entryType = value;
-                              _selectedIds.clear();
-                            }),
-                            tileBuilder: _transactionTile,
-                          ),
+                      enabled: !_showReports && !_showTransactions,
+                      child: NotificationListener<ScrollStartNotification>(
+                        onNotification: (notification) {
+                          if (notification.depth == 0 &&
+                              notification.dragDetails != null) {
+                            _swipeStartPage =
+                                _pageController.page?.roundToDouble() ??
+                                _navigationIndex.toDouble();
+                          }
+                          return false;
                         },
+                        child: PageView.builder(
+                          key: const ValueKey('main-pages'),
+                          controller: _pageController,
+                          onPageChanged: (index) => setState(() {
+                            _navigationIndex = index;
+                            _selectedIds.clear();
+                          }),
+                          itemCount: 3,
+                          pageSnapping: false,
+                          physics: _ShortSwipePagePhysics(
+                            startPage: () => _swipeStartPage,
+                          ),
+                          itemBuilder: (context, index) => switch (index) {
+                            0 => HomeScreen(
+                              currency: widget.store.currency,
+                              month: _month,
+                              summary: summary,
+                              tab: _homeTab,
+                              onTabChanged: (tab) => setState(() {
+                                _homeTab = tab;
+                                _selectedIds.clear();
+                              }),
+                              onMonthChanged: _changeMonth,
+                              tileBuilder: (entry) =>
+                                  _transactionTile(entry, compact: true),
+                            ),
+                            1 => OverviewScreen(
+                              store: widget.store,
+                              month: _month,
+                              summary: summary,
+                              recurringError: _recurringError,
+                              onOpenRecurring: _openRecurring,
+                            ),
+                            2 => FreedomScreen(store: widget.store),
+                            _ => throw StateError('Unknown page'),
+                          },
+                        ),
                       ),
                     ),
+                    // Preserve pager state beneath drawer destinations.
+                    if (!_showReports) const SizedBox.shrink(),
                     if (_showReports)
                       ReportsScreen(
                         month: _month,
@@ -417,6 +452,26 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                         hasLegacyCurrencyData:
                             widget.store.hasLegacyCurrencyData,
                       ),
+                    if (_showTransactions)
+                      TransactionsScreen(
+                        entries: widget.store.searchEntries(
+                          query: _searchQuery,
+                          type: _entryType,
+                        ),
+                        search: _searchQuery,
+                        type: _entryType,
+                        onSearchChanged: (value) => setState(() {
+                          _searchQuery = value;
+                          _selectedIds.clear();
+                        }),
+                        onTypeChanged: (value) => setState(() {
+                          _entryType = value;
+                          _selectedIds.clear();
+                        }),
+                        tileBuilder: _transactionTile,
+                      )
+                    else
+                      const SizedBox.shrink(),
                   ],
                 ),
               ),
@@ -430,7 +485,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                   tooltip: 'Add transaction',
                   child: const Icon(Icons.add),
                 ),
-          bottomNavigationBar: _showReports
+          bottomNavigationBar: _showReports || _showTransactions
               ? null
               : NavigationBar(
                   selectedIndex: _navigationIndex,
@@ -440,6 +495,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                       _selectedIds.clear();
                       _navigationIndex = index;
                       _showReports = false;
+                      _showTransactions = false;
                     });
                   },
                   destinations: const [
@@ -455,14 +511,56 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                       icon: Icon(Icons.timeline),
                       label: 'Cashflow',
                     ),
-                    NavigationDestination(
-                      icon: Icon(Icons.receipt_long_outlined),
-                      label: 'Transactions',
-                    ),
                   ],
                 ),
         ),
       );
     },
   );
+}
+
+// The start page is captured before onPageChanged changes the selected tab.
+// Disabling PageView's default snap physics lets this shorter threshold apply.
+class _ShortSwipePagePhysics extends PageScrollPhysics {
+  const _ShortSwipePagePhysics({required this.startPage, super.parent});
+  final double Function() startPage;
+  @override
+  _ShortSwipePagePhysics applyTo(ScrollPhysics? ancestor) =>
+      _ShortSwipePagePhysics(
+        startPage: startPage,
+        parent: buildParent(ancestor),
+      );
+  @override
+  double get minFlingDistance => 12;
+  @override
+  Simulation? createBallisticSimulation(
+    ScrollMetrics position,
+    double velocity,
+  ) {
+    if (position is! PageMetrics ||
+        position.page == null ||
+        (position.page! - position.page!.round()).abs() < 0.000001 ||
+        position.outOfRange) {
+      return super.createBallisticSimulation(position, velocity);
+    }
+    final start = startPage();
+    final delta = position.page! - start;
+    if (delta.abs() >= 0.08 && velocity.abs() < 300) {
+      final target = ((start + delta.sign) * position.viewportDimension).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      );
+      if ((target - position.pixels).abs() < toleranceFor(position).distance) {
+        return null;
+      }
+      return ScrollSpringSimulation(
+        spring,
+        position.pixels,
+        target,
+        velocity,
+        tolerance: toleranceFor(position),
+      );
+    }
+    return super.createBallisticSimulation(position, velocity);
+  }
 }

@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../core/presentation/entry_type_picker.dart';
+
 import '../core/data/ledger_store.dart';
 import '../core/domain/category.dart';
 import '../core/domain/ledger.dart';
@@ -41,7 +43,7 @@ class _TransactionFormState extends State<TransactionForm> {
     if (e?.id != null) {
       scannedInvoice = widget.store.scannedInvoiceFor(e!.id!);
     }
-    currency = e?.currency ?? Currency.eur;
+    currency = e?.currency ?? widget.store.currency;
     type = e?.type ?? EntryType.expense;
     date = e?.date ?? dateOnly(DateTime.now());
     accountId = e?.accountId;
@@ -254,12 +256,8 @@ class _TransactionFormState extends State<TransactionForm> {
                 Text(
                   'Added ${creationTimestamp(context, widget.entry!.createdAt!)}',
                 ),
-              DropdownButtonFormField<EntryType>(
-                initialValue: type,
-                decoration: const InputDecoration(labelText: 'Type'),
-                items: EntryType.values
-                    .map((t) => DropdownMenuItem(value: t, child: Text(t.name)))
-                    .toList(),
+              EntryTypePicker(
+                value: type,
                 onChanged: saving
                     ? null
                     : (t) => setState(() {
@@ -279,7 +277,10 @@ class _TransactionFormState extends State<TransactionForm> {
                     ? 'Enter a description.'
                     : null,
               ),
-              const Text('Currency: €'),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text('Currency: ${widget.store.currency.code}'),
+              ),
               TextFormField(
                 controller: amount,
                 enabled: !saving,

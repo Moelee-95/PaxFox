@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/presentation/entry_type_picker.dart';
+
 import '../core/data/ledger_store.dart';
 import '../core/domain/ledger.dart';
 import '../core/domain/recurring.dart';
@@ -12,7 +14,7 @@ const _recurringInfo =
 const _recurringHistoryInfo =
     'Unpaid occurrences keep their original amount and account. Retry books the payment on today\'s date and preserves its scheduled due date in this history. Editing a rule affects future occurrences only. If a posted payment is edited or deleted in Transactions, it is never automatically recreated.';
 const _recurringFormInfo =
-    'Expenses and income repeat monthly in EUR. Future changes do not alter already posted payments or unpaid bills. Choose a start date today or later; past transactions do not create recurring rules.';
+    'Expenses and income repeat monthly in your app currency. Future changes do not alter already posted payments or unpaid bills. Choose a start date today or later; past transactions do not create recurring rules.';
 
 class RecurringScreen extends StatefulWidget {
   const RecurringScreen({super.key, required this.store});
@@ -124,7 +126,7 @@ class _RecurringScreenState extends State<RecurringScreen> {
                             : Colors.red,
                       ),
                       subtitle: Text(
-                        '${rule.type == EntryType.income ? 'Income' : 'Expense'} - €${Currency.eur.format(rule.amount)} - ${widget.store.accounts.where((a) => a.id == rule.accountId).firstOrNull?.name ?? 'Account unavailable'}\n${rule.active ? 'Next' : 'Paused; scheduled'}: ${dayKey(rule.nextDate)} - every ${rule.interval} month(s), day ${rule.day}',
+                        '${rule.type == EntryType.income ? 'Income' : 'Expense'} - ${widget.store.currency.symbol}${widget.store.currency.format(rule.amount)} - ${widget.store.accounts.where((a) => a.id == rule.accountId).firstOrNull?.name ?? 'Account unavailable'}\n${rule.active ? 'Next' : 'Paused; scheduled'}: ${dayKey(rule.nextDate)} - every ${rule.interval} month(s), day ${rule.day}',
                       ),
                       isThreeLine: true,
                       trailing: const Icon(Icons.edit_outlined),
@@ -165,7 +167,7 @@ class _RecurringScreenState extends State<RecurringScreen> {
                   children: [
                     ListTile(
                       title: Text(
-                        '${occurrence.description} - €${Currency.eur.format(occurrence.amount)}',
+                        '${occurrence.description} - ${widget.store.currency.symbol}${widget.store.currency.format(occurrence.amount)}',
                       ),
                       subtitle: Text(
                         '${occurrence.type.name} - ${dayKey(occurrence.date)} - ${occurrence.status == 'posted' && occurrence.transactionId == null ? 'Posted, then deleted manually' : occurrence.status}${occurrence.error == null ? '' : '\n${occurrence.error}'}',
@@ -263,7 +265,7 @@ class _RecurringFormState extends State<RecurringForm> {
     final rule = widget.rule;
     description = TextEditingController(text: rule?.description ?? '');
     amount = TextEditingController(
-      text: rule == null ? '' : Currency.eur.format(rule.amount),
+      text: rule == null ? '' : widget.store.currency.format(rule.amount),
     );
     interval = TextEditingController(text: '${rule?.interval ?? 1}');
     type = rule?.type ?? EntryType.expense;
@@ -300,7 +302,7 @@ class _RecurringFormState extends State<RecurringForm> {
           isAsset: type == EntryType.income && isAsset,
           isLiability: type == EntryType.expense && isLiability,
           description: description.text.trim(),
-          amount: Currency.eur.parse(amount.text),
+          amount: widget.store.currency.parse(amount.text),
           category: category!,
           accountId: accountId!,
           day: day,
@@ -352,19 +354,9 @@ class _RecurringFormState extends State<RecurringForm> {
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            DropdownButtonFormField<EntryType>(
-              initialValue: type,
-              decoration: const InputDecoration(labelText: 'Recurring type'),
-              items: const [
-                DropdownMenuItem(
-                  value: EntryType.expense,
-                  child: Text('Expense'),
-                ),
-                DropdownMenuItem(
-                  value: EntryType.income,
-                  child: Text('Income'),
-                ),
-              ],
+            EntryTypePicker(
+              value: type,
+              types: const [EntryType.expense, EntryType.income],
               onChanged: busy
                   ? null
                   : (value) => setState(() {
@@ -398,16 +390,19 @@ class _RecurringFormState extends State<RecurringForm> {
               validator: (s) =>
                   s == null || s.trim().isEmpty ? 'Enter a description.' : null,
             ),
+            const SizedBox(height: 16),
             TextFormField(
               controller: amount,
               enabled: !busy,
-              decoration: const InputDecoration(labelText: 'Amount (€)'),
+              decoration: InputDecoration(
+                labelText: 'Amount (${widget.store.currency.symbol.trim()})',
+              ),
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
               validator: (s) {
                 try {
-                  if (Currency.eur.parse(s ?? '') <= 0) {
+                  if (widget.store.currency.parse(s ?? '') <= 0) {
                     return 'Enter an amount greater than zero.';
                   }
                 } on FormatException catch (e) {
@@ -416,6 +411,7 @@ class _RecurringFormState extends State<RecurringForm> {
                 return null;
               },
             ),
+            const SizedBox(height: 16),
             DropdownButtonFormField<String>(
               key: ValueKey('category-$type'),
               initialValue: category,
@@ -435,6 +431,7 @@ class _RecurringFormState extends State<RecurringForm> {
                   : (value) => setState(() => category = value),
               validator: (value) => value == null ? 'Select a category.' : null,
             ),
+            const SizedBox(height: 16),
             DropdownButtonFormField<int>(
               key: ValueKey('account-$type'),
               initialValue:
@@ -463,6 +460,7 @@ class _RecurringFormState extends State<RecurringForm> {
                   ? 'Select an account for this recurring entry.'
                   : null,
             ),
+            const SizedBox(height: 16),
             DropdownButtonFormField<int>(
               initialValue: day,
               decoration: const InputDecoration(labelText: 'Day of month'),

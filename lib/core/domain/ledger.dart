@@ -2,12 +2,18 @@ enum EntryType { expense, income, refund, transfer }
 
 enum Currency {
   eur('EUR', 2),
-  // Retained only to decode legacy data; new app writes support EUR only.
+  usd('USD', 2),
+  gbp('GBP', 2),
   iqd('IQD', 3);
 
   const Currency(this.code, this.exponent);
   final String code;
-  String get symbol => this == Currency.eur ? '\u20ac' : code;
+  String get symbol => switch (this) {
+    Currency.eur => '\u20ac',
+    Currency.usd => '\u0024',
+    Currency.gbp => '\u00a3',
+    Currency.iqd => 'IQD ',
+  };
   String display(int minor) => '$symbol${format(minor)}';
   final int exponent;
   int get scale => exponent == 2 ? 100 : 1000;
@@ -184,4 +190,26 @@ int accountBalance(
     }
   }
   return balance;
+}
+
+class Debt {
+  const Debt({
+    this.id,
+    required this.name,
+    required this.amount,
+    required this.currency,
+    this.createdAt,
+  });
+  final int? id;
+  final String name;
+  final int amount;
+  final Currency currency;
+  final DateTime? createdAt;
+  factory Debt.fromMap(Map<String, Object?> row) => Debt(
+    id: row['id'] as int,
+    name: row['name'] as String,
+    amount: row['amount'] as int,
+    currency: Currency.values.byName(row['currency'] as String),
+    createdAt: DateTime.tryParse(row['created_at'] as String? ?? ''),
+  );
 }

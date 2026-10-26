@@ -19,6 +19,8 @@ class InvoiceScanScreen extends StatefulWidget {
     required this.store,
     this.extractor,
     this.autoCapture = true,
+    this.initialGallery = false,
+    this.preparationTimeout = const Duration(seconds: 45),
     this.initialImages = const [],
     this.extractionTimeout,
     this.imagePreparation,
@@ -26,6 +28,8 @@ class InvoiceScanScreen extends StatefulWidget {
   final LedgerStore store;
   final InvoiceExtractor? extractor;
   final bool autoCapture;
+  final bool initialGallery;
+  final Duration preparationTimeout;
   final List<File> initialImages;
   final Duration? extractionTimeout;
   final InvoiceImagePreparation? imagePreparation;
@@ -39,7 +43,9 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
       widget.imagePreparation ?? InvoiceImagePreparation();
   String? _preparationStage;
   bool busy = false;
+  bool _showSources = false;
   int requestId = 0;
+  int captureId = 0;
   InvoiceExtractor? activeExtractor;
   Timer? extractionTimer, elapsedTimer;
   int elapsedSeconds = 0;
@@ -65,6 +71,7 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
   @override
   void dispose() {
     requestId++;
+    captureId++;
     extractionTimer?.cancel();
     elapsedTimer?.cancel();
     final extractor = activeExtractor;
@@ -81,7 +88,9 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
     super.initState();
     images.addAll(widget.initialImages);
     if (widget.autoCapture) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => capture());
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => capture(gallery: widget.initialGallery),
+      );
     }
   }
 
@@ -89,6 +98,7 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
     if (busy || images.length >= 10) {
       return;
     }
+    final currentCapture = ++captureId;
     setState(() {
       busy = true;
       error = null;
@@ -99,26 +109,50 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
           : await CunningDocumentScanner.getPictures(
               noOfPages: 10 - images.length,
             );
-      if (mounted && paths != null) {
+      if (mounted && currentCapture == captureId && paths != null) {
         final room = 10 - images.length;
         final pages = paths.take(room).toList();
         var failed = 0;
+        var timedOut = false;
         for (var i = 0; i < pages.length; i++) {
-          if (!mounted) break;
+          if (!mounted || currentCapture != captureId) break;
           setState(
             () => _preparationStage =
                 'Optimizing image ${i + 1} of ${pages.length}',
           );
           try {
-            final image = await _imagePreparation.prepare(File(pages[i]));
-            if (mounted) setState(() => images.add(image));
+            var expired = false;
+            final pending = _imagePreparation.prepare(File(pages[i]));
+            // A stuck native/file/decoder operation must never trap the screen.
+            unawaited(
+              pending.then((file) {
+                if (expired || !mounted || currentCapture != captureId) {
+                  unawaited(_imagePreparation.release(file));
+                }
+              }, onError: (Object _) {}),
+            );
+            final image = await pending.timeout(
+              widget.preparationTimeout,
+              onTimeout: () {
+                expired = true;
+                throw TimeoutException('Image preparation timed out.');
+              },
+            );
+            if (mounted && currentCapture == captureId) {
+              setState(() => images.add(image));
+            }
+          } on TimeoutException {
+            timedOut = true;
+            break;
           } catch (_) {
             failed++;
           }
         }
-        if (mounted) {
+        if (mounted && currentCapture == captureId) {
           setState(() {
-            error = failed > 0
+            error = timedOut
+                ? 'Image optimization timed out. Try again with a smaller image or scan fewer pages.'
+                : failed > 0
                 ? '$failed image(s) could not be prepared. Try a JPEG/PNG under 25 MB or scan again.'
                 : paths.length > room
                 ? 'Only the first $room selected images were added. Maximum 10 pages.'
@@ -127,13 +161,13 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
         }
       }
     } catch (_) {
-      if (mounted) {
+      if (mounted && currentCapture == captureId) {
         setState(
           () => error = 'Camera unavailable or permission denied. Try gallery images, or enable camera access in device settings.',
         );
       }
     } finally {
-      if (mounted) {
+      if (mounted && currentCapture == captureId) {
         setState(() {
           busy = false;
           _preparationStage = null;
@@ -173,6 +207,7 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
         widget.extractor ??
         GeminiInvoiceExtractor(
           timeout: timeout,
+          currency: widget.store.currency,
           onProgress: (value) {
             if (mounted && requestId == currentRequest) {
               setState(() => stage = value);
@@ -240,7 +275,7 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
         actions: const [
           InfoButton(
             title: 'Invoice scanning information',
-            message: 'Capture all pages of ONE invoice, in order. You can add more images for a long receipt. Maximum 10. Review every extracted price and category before saving.',
+            message: 'Add pages from one or more invoices, in order. Each extracted item has its own invoice date. Maximum 10 pages. Review every extracted price and category before saving.',
           ),
         ],
       ),
@@ -273,6 +308,17 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
               onPressed: busy || images.isEmpty ? null : extract,
               child: const Text('Extract'),
             ),
+            if (_preparationStage != null)
+              TextButton.icon(
+                onPressed: () => setState(() {
+                  captureId++;
+                  busy = false;
+                  _preparationStage = null;
+                  error = 'Image preparation cancelled.';
+                }),
+                icon: const Icon(Icons.close),
+                label: const Text('Cancel preparation'),
+              ),
             if (busy && activeExtractor != null)
               TextButton.icon(
                 onPressed: () =>
@@ -286,23 +332,6 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Wrap(
-            spacing: 10,
-            children: [
-              IconButton.filledTonal(
-                onPressed: busy || images.length >= 10 ? null : () => capture(),
-                icon: const Icon(Icons.document_scanner_outlined),
-                tooltip: 'Scan more pages',
-              ),
-              IconButton.outlined(
-                onPressed: busy || images.length >= 10
-                    ? null
-                    : () => capture(gallery: true),
-                tooltip: 'Gallery',
-                icon: const Icon(Icons.photo_library_outlined),
-              ),
-            ],
-          ),
           for (var i = 0; i < images.length; i++)
             Card(
               child: Column(
@@ -345,6 +374,38 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
                 ],
               ),
             ),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: _showSources
+                  ? Wrap(
+                      spacing: 10,
+                      children: [
+                        IconButton.filledTonal(
+                          onPressed: busy || images.length >= 10
+                              ? null
+                              : () => capture(),
+                          icon: const Icon(Icons.document_scanner_outlined),
+                          tooltip: 'Scan more pages',
+                        ),
+                        IconButton.outlined(
+                          onPressed: busy || images.length >= 10
+                              ? null
+                              : () => capture(gallery: true),
+                          tooltip: 'Gallery',
+                          icon: const Icon(Icons.photo_library_outlined),
+                        ),
+                      ],
+                    )
+                  : TextButton.icon(
+                      onPressed: busy || images.length >= 10
+                          ? null
+                          : () => setState(() => _showSources = true),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add pages'),
+                    ),
+            ),
+          ),
         ],
       ),
     ),

@@ -108,8 +108,6 @@ void main() {
         tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
         isTrue,
       );
-      await tester.tap(find.byType(DropdownButtonFormField<EntryType>));
-      await tester.pumpAndSettle();
       await tester.tap(find.text('Income').last);
       await tester.pumpAndSettle();
       expect(find.text('Asset'), findsOneWidget);
@@ -200,7 +198,7 @@ void main() {
       factory: databaseFactoryFfi,
     );
     try {
-      expect(await migrated.db.getVersion(), 11);
+      expect(await migrated.db.getVersion(), 12);
       expect(migrated.recurringRules.single.description, 'Existing schedule');
       expect(migrated.recurringRules.single.isAsset, isFalse);
       expect(migrated.recurringRules.single.isLiability, isFalse);

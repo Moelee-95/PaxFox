@@ -77,6 +77,7 @@ class MonthlyLedger {
   late final List<LedgerEntry> incomeEntries;
   late final Map<Currency, Totals> totalsByCurrency;
   late final Map<(Currency, String), int> spendingByCategory;
+  Totals totalsFor(Currency currency) => totalsByCurrency[currency] ?? Totals();
   Totals get eurTotals => totalsByCurrency[Currency.eur] ?? Totals();
 
   static int _spendingAmount(LedgerEntry entry) =>

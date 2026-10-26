@@ -19,7 +19,7 @@ class LedgerDatabase {
     final db = await (factory ?? databaseFactorySqflitePlugin).openDatabase(
       location,
       options: OpenDatabaseOptions(
-        version: 11,
+        version: 12,
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) {
             await db.execute(
@@ -53,8 +53,13 @@ class LedgerDatabase {
           if (oldVersion < 11) {
             await _addRecurringClassification(db);
           }
+          if (oldVersion < 12) {
+            await _upgradeCurrencyAndDebts(db);
+          }
         },
-        onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
+        // Table rebuild in v12 preserves dependent receipt/history links.
+        onConfigure: (db) => db.execute('PRAGMA foreign_keys = OFF'),
+        onOpen: (db) => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: (db, version) async {
           await db.execute(
             'CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
@@ -84,10 +89,49 @@ class LedgerDatabase {
           await _createReceipts(db);
           await _createInvoiceBatches(db);
           await _addRecurringClassification(db);
+          await _upgradeCurrencyAndDebts(db);
         },
       ),
     );
     return db;
+  }
+
+  static Future<void> _upgradeCurrencyAndDebts(DatabaseExecutor db) async {
+    for (final table in ['accounts', 'transactions']) {
+      final sql =
+          (await db.rawQuery(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+                [table],
+              )).single['sql']
+              as String;
+      if (sql.contains("'usd'")) continue;
+      final widened = sql
+          .replaceFirst(
+            RegExp('CREATE TABLE ["`]?$table["`]?'),
+            'CREATE TABLE ${table}_v12',
+          )
+          .replaceAll("'eur','iqd'", "'eur','iqd','usd','gbp'");
+      await db.execute(widened);
+      await db.execute('INSERT INTO ${table}_v12 SELECT * FROM $table');
+      await db.execute('DROP TABLE $table');
+      await db.execute('ALTER TABLE ${table}_v12 RENAME TO $table');
+    }
+    for (final column in ['date', 'category', 'account_id', 'destination_id']) {
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS transactions_$column ON transactions($column)',
+      );
+    }
+    final columns = await db.rawQuery('PRAGMA table_info(receipt_items)');
+    if (!columns.any((row) => row['name'] == 'item_date')) {
+      await db.execute('ALTER TABLE receipt_items ADD COLUMN item_date TEXT');
+    }
+    await db.execute(
+      'CREATE TABLE IF NOT EXISTS debts (id INTEGER PRIMARY KEY, name TEXT NOT NULL, amount INTEGER NOT NULL CHECK(amount >= 0 AND amount <= 9000000000000000), currency TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)',
+    );
+    final violations = await db.rawQuery('PRAGMA foreign_key_check');
+    if (violations.isNotEmpty) {
+      throw StateError('Migration contains invalid links.');
+    }
   }
 
   static Future<void> _addOverdraftPolicy(DatabaseExecutor db) async {

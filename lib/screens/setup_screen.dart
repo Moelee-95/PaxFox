@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/data/ledger_store.dart';
 import '../core/domain/ledger.dart';
+import '../core/presentation/debt_editor.dart';
 
 class SetupScreen extends StatefulWidget {
   const SetupScreen({super.key, required this.store});
@@ -18,6 +19,8 @@ class _SetupScreenState extends State<SetupScreen> {
   final banks =
       <({TextEditingController name, TextEditingController balance})>[];
   int step = 0;
+  late Currency currency = widget.store.currency;
+  final debts = <Debt>[];
   bool noBank = false, saving = false;
   String? error;
   bool get hasCash =>
@@ -53,7 +56,7 @@ class _SetupScreenState extends State<SetupScreen> {
 
   int bankAmount(String input) {
     final trimmed = input.trim();
-    return Currency.eur.parse(trimmed.replaceFirst(RegExp(r'^-'), '')) *
+    return currency.parse(trimmed.replaceFirst(RegExp(r'^-'), '')) *
         (trimmed.startsWith('-') ? -1 : 1);
   }
 
@@ -76,29 +79,33 @@ class _SetupScreenState extends State<SetupScreen> {
     });
     try {
       final today = dateOnly(DateTime.now());
-      await widget.store.completeSetup([
-        if (!hasCash)
-          Account(
-            name: 'Cash',
-            currency: Currency.eur,
-            opening: Currency.eur.parse(cash.text),
-            asOf: today,
-            kind: AccountKind.cash,
-            includeOnAsOf: true,
-          ),
-        if (!noBank)
-          for (final bank in banks)
+      await widget.store.completeSetup(
+        [
+          if (!hasCash)
             Account(
-              name: bank.name.text.trim(),
-              currency: Currency.eur,
-              opening: bankAmount(bank.balance.text),
+              name: 'Cash',
+              currency: currency,
+              opening: currency.parse(cash.text),
               asOf: today,
-              kind: AccountKind.bank,
-              allowOverdraft: overdrafts[banks.indexOf(bank)],
-              available: !blockedBanks[banks.indexOf(bank)],
+              kind: AccountKind.cash,
               includeOnAsOf: true,
             ),
-      ]);
+          if (!noBank)
+            for (final bank in banks)
+              Account(
+                name: bank.name.text.trim(),
+                currency: currency,
+                opening: bankAmount(bank.balance.text),
+                asOf: today,
+                kind: AccountKind.bank,
+                allowOverdraft: overdrafts[banks.indexOf(bank)],
+                available: !blockedBanks[banks.indexOf(bank)],
+                includeOnAsOf: true,
+              ),
+        ],
+        selectedCurrency: currency,
+        initialDebts: debts,
+      );
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -108,6 +115,24 @@ class _SetupScreenState extends State<SetupScreen> {
       }
     }
   }
+
+  Future<void> editDebt([int? index]) => showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => DebtEditor(
+      currency: currency,
+      debt: index == null ? null : debts[index],
+      onSave: (debt) async {
+        setState(() {
+          if (index == null) {
+            debts.add(debt);
+          } else {
+            debts[index] = debt;
+          }
+        });
+      },
+    ),
+  );
 
   @override
   Widget build(BuildContext context) => PopScope(
@@ -139,8 +164,38 @@ class _SetupScreenState extends State<SetupScreen> {
                         style: Theme.of(context).textTheme.headlineSmall,
                       ),
                       const Text(
-                        'All balances are in EUR. Enter the cash you have before recording today’s payments in Moneva. Enter 0 if you have no cash.',
+                        'Choose your app currency before entering balances. This currency will be used for all accounts and transactions. Enter 0 if you have no cash.',
                       ),
+                      const SizedBox(height: 20),
+                      DropdownButtonFormField<Currency>(
+                        initialValue: currency,
+                        decoration: const InputDecoration(
+                          labelText: 'App currency',
+                        ),
+                        items: Currency.values
+                            .map(
+                              (value) => DropdownMenuItem(
+                                value: value,
+                                child: Text(
+                                  '${value.code} (${value.symbol.trim()})',
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged:
+                            widget.store.accounts.isNotEmpty ||
+                                widget.store.entries.isNotEmpty ||
+                                debts.isNotEmpty
+                            ? null
+                            : (value) => setState(() {
+                                currency = value!;
+                                cash.clear();
+                                for (final bank in banks) {
+                                  bank.balance.clear();
+                                }
+                              }),
+                      ),
+                      const SizedBox(height: 20),
                       if (hasCash)
                         const Padding(
                           padding: EdgeInsets.all(12),
@@ -151,15 +206,16 @@ class _SetupScreenState extends State<SetupScreen> {
                       else
                         TextFormField(
                           controller: cash,
-                          decoration: const InputDecoration(
-                            labelText: 'Cash balance (€)',
+                          decoration: InputDecoration(
+                            labelText:
+                                'Cash balance (${currency.symbol.trim()})',
                           ),
                           keyboardType: const TextInputType.numberWithOptions(
                             decimal: true,
                           ),
                           validator: (value) {
                             try {
-                              Currency.eur.parse(value ?? '');
+                              currency.parse(value ?? '');
                             } on FormatException catch (e) {
                               return e.message;
                             }
@@ -195,7 +251,7 @@ class _SetupScreenState extends State<SetupScreen> {
                         ListTile(
                           title: Text(account.name),
                           subtitle: Text(
-                            'Existing account kept · €${Currency.eur.format(accountBalance(account, widget.store.entries, DateTime.now()))}',
+                            'Existing account kept · ${currency.symbol}${currency.format(accountBalance(account, widget.store.entries, DateTime.now()))}',
                           ),
                         ),
                       if (!hasBank)
@@ -222,10 +278,12 @@ class _SetupScreenState extends State<SetupScreen> {
                                         ? 'Enter a bank account name.'
                                         : null,
                                   ),
+                                  const SizedBox(height: 16),
                                   TextFormField(
                                     controller: banks[i].balance,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Bank balance (€)',
+                                    decoration: InputDecoration(
+                                      labelText:
+                                          'Bank balance (${currency.symbol.trim()})',
                                     ),
                                     keyboardType:
                                         const TextInputType.numberWithOptions(
@@ -281,14 +339,14 @@ class _SetupScreenState extends State<SetupScreen> {
                   ListTile(
                     title: const Text('Cash'),
                     trailing: Text(
-                      '€${Currency.eur.format(Currency.eur.parse(cash.text))}',
+                      '${currency.symbol}${currency.format(currency.parse(cash.text))}',
                     ),
                   ),
                 for (final account in widget.store.accounts)
                   ListTile(
                     title: Text('${account.name} (kept)'),
                     trailing: Text(
-                      '€${Currency.eur.format(accountBalance(account, widget.store.entries, DateTime.now()))}',
+                      '${currency.symbol}${currency.format(accountBalance(account, widget.store.entries, DateTime.now()))}',
                     ),
                   ),
                 if (!noBank)
@@ -296,11 +354,39 @@ class _SetupScreenState extends State<SetupScreen> {
                     ListTile(
                       title: Text(bank.name.text.trim()),
                       trailing: Text(
-                        '€${Currency.eur.format(bankAmount(bank.balance.text))}',
+                        '${currency.symbol}${currency.format(bankAmount(bank.balance.text))}',
                       ),
                     ),
                 const Text(
                   'Cash cannot go below zero. Bank payments are rejected if funds are insufficient, unless overdraft is enabled for that bank. Setup is saved only when you finish.',
+                ),
+              ],
+              if (step == 2) ...[
+                const SizedBox(height: 20),
+                Text(
+                  'Outstanding debts (optional)',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const Text(
+                  'Include loans from people or banks. Starting account balances should already include any borrowed money you still hold.',
+                ),
+                for (var i = 0; i < debts.length; i++)
+                  ListTile(
+                    title: Text(debts[i].name),
+                    subtitle: Text(currency.display(debts[i].amount)),
+                    trailing: IconButton(
+                      tooltip: 'Remove debt',
+                      icon: const Icon(Icons.close),
+                      onPressed: saving
+                          ? null
+                          : () => setState(() => debts.removeAt(i)),
+                    ),
+                    onTap: saving ? null : () => editDebt(i),
+                  ),
+                TextButton.icon(
+                  onPressed: saving ? null : () => editDebt(),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add debt'),
                 ),
               ],
               if (error != null)

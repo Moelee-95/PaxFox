@@ -40,7 +40,7 @@ void main() {
       await tester.tap(find.text('Overview'));
       await tester.pumpAndSettle();
       final anchor = tester.getRect(find.byTooltip('Add transaction'));
-      final navigationPoint = tester.getCenter(find.text('Transactions'));
+      final navigationPoint = tester.getCenter(find.text('Cashflow'));
       await tester.tap(find.byTooltip('Add transaction'));
       await tester.pumpAndSettle();
       expect(find.text('Add manually'), findsOneWidget);
@@ -111,6 +111,46 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Home'), findsOneWidget);
       expect(store.entries, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'gallery shortcut opens the scanner with gallery selection and no camera launch',
+    (tester) async {
+      const gallery = MethodChannel('plugins.flutter.io/image_picker');
+      const camera = MethodChannel('cunning_document_scanner');
+      var picked = 0, scanned = 0;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(gallery, (
+        call,
+      ) async {
+        picked++;
+        return <String>[];
+      });
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(camera, (
+        _,
+      ) async {
+        scanned++;
+        return <String>[];
+      });
+      addTearDown(() {
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          gallery,
+          null,
+        );
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          camera,
+          null,
+        );
+      });
+      await tester.pumpWidget(MyApp(store: store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Add transaction'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('From gallery'));
+      await tester.pumpAndSettle();
+      expect(find.byType(InvoiceScanScreen), findsOneWidget);
+      expect(picked, 1);
+      expect(scanned, 0);
       expect(tester.takeException(), isNull);
     },
   );

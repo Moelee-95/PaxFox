@@ -23,7 +23,7 @@ class ReportsScreen extends StatelessWidget {
         const Padding(
           padding: EdgeInsets.all(12),
           child: Text(
-            'Existing non-EUR data is retained locally and excluded from this EUR-only version. No conversion has been applied.',
+            'Existing data in other currencies is retained locally and excluded from these totals. No conversion has been applied.',
           ),
         ),
       if (summary.entries.isEmpty)

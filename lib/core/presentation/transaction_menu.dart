@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-enum TransactionCreation { manual, scan }
+enum TransactionCreation { manual, scan, gallery }
 
 Future<TransactionCreation?> showTransactionMenu(
   BuildContext context, {
@@ -52,6 +52,11 @@ Future<TransactionCreation?> showTransactionMenu(
                             action: TransactionCreation.scan,
                             label: 'Scan invoice',
                             icon: Icons.document_scanner_outlined,
+                          ),
+                          (
+                            action: TransactionCreation.gallery,
+                            label: 'From gallery',
+                            icon: Icons.photo_library_outlined,
                           ),
                         ])
                           FilledButton.tonalIcon(

@@ -53,6 +53,12 @@ class LedgerStore extends ChangeNotifier {
   FreedomPlan? plan;
   bool hasLegacyCurrencyData = false;
   bool setupCompleted = false;
+  Currency _currency = Currency.eur;
+  Currency get currency => _currency;
+  List<Debt> _debts = const [];
+  List<Debt> get debts => _debts;
+  int get totalDebt => debts.fold(0, (sum, debt) => sum + debt.amount);
+  int get netWealth => currentBalances.wealth - totalDebt;
   int invoiceTimeoutSeconds = 180;
 
   Future<void> saveInvoiceTimeout(int seconds) async {
@@ -88,6 +94,15 @@ class LedgerStore extends ChangeNotifier {
         for (final row in settingRows)
           row['key'] as String: row['value'] as String,
       };
+      final activeCurrency = Currency.values.byName(
+        settingsByKey['app_currency'] ?? 'eur',
+      );
+      final debtList = (await txn.query(
+        'debts',
+        where: 'currency = ?',
+        whereArgs: [activeCurrency.name],
+        orderBy: 'name',
+      )).map(Debt.fromMap).toList();
       final savedTimeout = int.tryParse(
         settingsByKey['invoice_timeout_seconds'] ?? '',
       );
@@ -117,21 +132,22 @@ class LedgerStore extends ChangeNotifier {
       final planData = planJson == null
           ? null
           : jsonDecode(planJson) as Map<String, dynamic>;
-      final hasLegacyPlan = planData != null && planData['currency'] != 'eur';
+      final hasLegacyPlan =
+          planData != null && planData['currency'] != activeCurrency.name;
       final legacy =
           hasLegacyPlan ||
           (await txn.query(
             'transactions',
             columns: ['id'],
             where: 'currency != ?',
-            whereArgs: ['eur'],
+            whereArgs: [activeCurrency.name],
             limit: 1,
           )).isNotEmpty ||
           (await txn.query(
             'accounts',
             columns: ['id'],
             where: 'currency != ?',
-            whereArgs: ['eur'],
+            whereArgs: [activeCurrency.name],
             limit: 1,
           )).isNotEmpty;
       final nextPlan = planData == null || hasLegacyPlan
@@ -140,16 +156,18 @@ class LedgerStore extends ChangeNotifier {
       final entryList = (await txn.query(
         'transactions',
         where: 'currency = ?',
-        whereArgs: ['eur'],
+        whereArgs: [activeCurrency.name],
         orderBy: 'date DESC, id DESC',
       )).map(LedgerEntry.fromMap).toList();
       final accountList = (await txn.query(
         'accounts',
         where: 'currency = ?',
-        whereArgs: ['eur'],
+        whereArgs: [activeCurrency.name],
         orderBy: 'name',
       )).map(Account.fromMap).toList();
       return (
+        currency: activeCurrency,
+        debts: debtList,
         timeout: timeout,
         receiptIds: receiptIds,
         rules: rules,
@@ -162,6 +180,8 @@ class LedgerStore extends ChangeNotifier {
         accounts: accountList,
       );
     });
+    _currency = snapshot.currency;
+    _debts = List.unmodifiable(snapshot.debts);
     invoiceTimeoutSeconds = snapshot.timeout;
     _receiptTransactionIds = Set.unmodifiable(snapshot.receiptIds);
     _recurringRules = List.unmodifiable(snapshot.rules);
@@ -185,8 +205,8 @@ class LedgerStore extends ChangeNotifier {
   }
 
   Future<void> savePlan(FreedomPlan value) async {
-    if (value.currency != Currency.eur) {
-      throw ArgumentError('Only EUR is supported.');
+    if (value.currency != currency) {
+      throw ArgumentError('Use the app currency.');
     }
     projectFreedom(value);
     await db.insert('settings', {
@@ -209,6 +229,7 @@ class LedgerStore extends ChangeNotifier {
           'receipt_items',
           {
             'description': entry.description,
+            'item_date': dayKey(entry.date),
             'total': entry.type == EntryType.refund
                 ? -entry.amount
                 : entry.amount,
@@ -310,7 +331,7 @@ class LedgerStore extends ChangeNotifier {
     return (imported: imported, skipped: skipped);
   }
 
-  static Future<int> _writeEntry(
+  Future<int> _writeEntry(
     DatabaseExecutor txn,
     LedgerEntry entry, {
     bool allowUnassigned = false,
@@ -328,8 +349,8 @@ class LedgerStore extends ChangeNotifier {
         throw ArgumentError('Use invoice review to change the receipt total.');
       }
     }
-    if (entry.currency != Currency.eur) {
-      throw ArgumentError('Only EUR is supported.');
+    if (entry.currency != currency) {
+      throw ArgumentError('Use the app currency.');
     }
     if (entry.amount <= 0 ||
         entry.amount > 9000000000000000 ||
@@ -564,9 +585,9 @@ class LedgerStore extends ChangeNotifier {
     await refresh();
   }
 
-  static void _validateAccount(Account account) {
-    if (account.currency != Currency.eur) {
-      throw ArgumentError('Only EUR is supported.');
+  void _validateAccount(Account account, {Currency? selectedCurrency}) {
+    if (account.currency != (selectedCurrency ?? currency)) {
+      throw ArgumentError('Use the app currency.');
     }
     if (account.name.trim().isEmpty ||
         account.opening.abs() > 9000000000000000) {
@@ -656,9 +677,23 @@ class LedgerStore extends ChangeNotifier {
     }
   }
 
-  Future<void> completeSetup(List<Account> newAccounts) async {
+  Future<void> completeSetup(
+    List<Account> newAccounts, {
+    Currency? selectedCurrency,
+    List<Debt> initialDebts = const [],
+  }) async {
+    final setupCurrency = selectedCurrency ?? currency;
+    if (setupCurrency != currency &&
+        (accounts.isNotEmpty || entries.isNotEmpty)) {
+      throw ArgumentError(
+        'Existing amounts cannot be relabeled to another currency.',
+      );
+    }
+    for (final debt in initialDebts) {
+      _validateDebt(debt, setupCurrency);
+    }
     for (final account in newAccounts) {
-      _validateAccount(account);
+      _validateAccount(account, selectedCurrency: setupCurrency);
     }
     await db.transaction((txn) async {
       final done = await txn.query(
@@ -672,7 +707,7 @@ class LedgerStore extends ChangeNotifier {
       final existing = (await txn.query(
         'accounts',
         where: 'currency = ?',
-        whereArgs: ['eur'],
+        whereArgs: [setupCurrency.name],
       )).map(Account.fromMap);
       if (![
         ...existing,
@@ -683,11 +718,61 @@ class LedgerStore extends ChangeNotifier {
       for (final account in newAccounts) {
         await txn.insert('accounts', account.toMap());
       }
+      for (final debt in initialDebts) {
+        await _writeDebt(txn, debt);
+      }
+      await txn.insert('settings', {
+        'key': 'app_currency',
+        'value': setupCurrency.name,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
       await txn.insert('settings', {
         'key': 'setup_completed',
         'value': 'true',
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     });
+    await refresh();
+  }
+
+  static void _validateDebt(Debt debt, Currency expected) {
+    if (debt.name.trim().isEmpty ||
+        debt.amount < 0 ||
+        debt.amount > 9000000000000000 ||
+        debt.currency != expected) {
+      throw ArgumentError(
+        'Enter a lender and a valid outstanding amount in the app currency.',
+      );
+    }
+  }
+
+  static Future<void> _writeDebt(DatabaseExecutor txn, Debt debt) async {
+    final now = DateTime.now().toUtc().toIso8601String();
+    final values = <String, Object?>{
+      'name': debt.name.trim(),
+      'amount': debt.amount,
+      'currency': debt.currency.name,
+      'updated_at': now,
+    };
+    if (debt.id == null) {
+      await txn.insert('debts', {...values, 'created_at': now});
+    } else {
+      final count = await txn.update(
+        'debts',
+        values,
+        where: 'id = ?',
+        whereArgs: [debt.id],
+      );
+      if (count != 1) throw ArgumentError('Debt no longer exists.');
+    }
+  }
+
+  Future<void> saveDebt(Debt debt) async {
+    _validateDebt(debt, currency);
+    await db.transaction((txn) => _writeDebt(txn, debt));
+    await refresh();
+  }
+
+  Future<void> deleteDebt(int id) async {
+    await db.delete('debts', where: 'id = ?', whereArgs: [id]);
     await refresh();
   }
 
@@ -813,12 +898,14 @@ class LedgerStore extends ChangeNotifier {
       final accounts = await txn.query(
         'accounts',
         where: rule.type == EntryType.income
-            ? "id = ? AND currency = 'eur'"
-            : "id = ? AND available = 1 AND currency = 'eur'",
-        whereArgs: [rule.accountId],
+            ? "id = ? AND currency = ?"
+            : "id = ? AND available = 1 AND currency = ?",
+        whereArgs: [rule.accountId, currency.name],
       );
       if (accounts.isEmpty) {
-        throw ArgumentError('Choose an unblocked EUR payment account.');
+        throw ArgumentError(
+          'Choose an unblocked payment account in the app currency.',
+        );
       }
       final account = Account.fromMap(accounts.single);
       if (account.includeOnAsOf
@@ -895,7 +982,7 @@ class LedgerStore extends ChangeNotifier {
     await refresh();
   }
 
-  static Future<void> _postOccurrence(
+  Future<void> _postOccurrence(
     DatabaseExecutor txn,
     int id, {
     DateTime? paymentDate,
@@ -936,7 +1023,7 @@ class LedgerStore extends ChangeNotifier {
         LedgerEntry(
           type: occurrence.type,
           amount: occurrence.amount,
-          currency: Currency.eur,
+          currency: currency,
           date: chargedOn,
           description: occurrence.description,
           category: occurrence.category,
@@ -1057,6 +1144,7 @@ class LedgerStore extends ChangeNotifier {
     validateInvoice(
       draft,
       categoriesFor(EntryType.expense).map((c) => c.name).toSet(),
+      currency: currency,
     );
     await db.transaction((txn) async {
       final batchId = await txn.insert('scanned_invoices', {
@@ -1074,6 +1162,7 @@ class LedgerStore extends ChangeNotifier {
             total: draft.adjustment,
             category: draft.category,
             edited: true,
+            date: draft.date,
           ),
       ];
       // Credits first so an invoice discount can fund the gross item charges;
@@ -1091,24 +1180,27 @@ class LedgerStore extends ChangeNotifier {
           LedgerEntry(
             type: item.total! < 0 ? EntryType.refund : EntryType.expense,
             amount: item.total!.abs(),
-            currency: Currency.eur,
-            date: draft.date!,
+            currency: currency,
+            date: item.date ?? draft.date!,
             description: item.description.trim(),
             category: item.category!,
             accountId: accountId,
             notes: 'Merchant: ${draft.merchant}',
           ),
+          checkFunds: false,
         );
         await txn.insert('scanned_invoice_entries', {
           'transaction_id': id,
           'batch_id': batchId,
         });
         await txn.insert('receipt_items', {
-          ...item.toMap(),
+          ...(item.toMap()..remove('date')),
+          'item_date': dayKey(item.date ?? draft.date!),
           'transaction_id': id,
           'position': 0,
         });
       }
+      await _checkFunds(txn, [accountId]);
     });
     await refresh();
   }
@@ -1124,9 +1216,13 @@ class LedgerStore extends ChangeNotifier {
     required List<String> imagePaths,
     int? transactionId,
   }) async {
+    if (draft.date == null || draft.multipleInvoices) {
+      throw ArgumentError('Legacy invoice expenses require one invoice date.');
+    }
     validateInvoice(
       draft,
       categoriesFor(EntryType.expense).map((c) => c.name).toSet(),
+      currency: currency,
     );
     await db.transaction((txn) async {
       final existing = transactionId == null
@@ -1153,7 +1249,7 @@ class LedgerStore extends ChangeNotifier {
           id: transactionId,
           type: EntryType.expense,
           amount: draft.total!,
-          currency: Currency.eur,
+          currency: currency,
           date: draft.date!,
           description: draft.merchant.trim(),
           category: draft.category!,
@@ -1190,7 +1286,10 @@ class LedgerStore extends ChangeNotifier {
       );
       for (var i = 0; i < draft.items.length; i++) {
         await txn.insert('receipt_items', {
-          ...draft.items[i].toMap(),
+          ...(draft.items[i].toMap()..remove('date')),
+          'item_date': draft.items[i].date == null
+              ? null
+              : dayKey(draft.items[i].date!),
           'transaction_id': id,
           'position': i,
         });

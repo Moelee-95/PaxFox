@@ -94,9 +94,6 @@ class FreedomProjection {
 }
 
 FreedomProjection projectFreedom(FreedomPlan plan, {bool loseSalary = false}) {
-  if (plan.currency != Currency.eur) {
-    throw const FormatException('Only EUR plans are supported.');
-  }
   if (plan.spending <= 0 ||
       plan.portfolio < 0 ||
       plan.cash < 0 ||

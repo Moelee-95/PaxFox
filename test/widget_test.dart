@@ -158,7 +158,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Overview'));
     await tester.pumpAndSettle();
-    for (var index = 2; index < 4; index++) {
+    for (var index = 2; index < 3; index++) {
       await tester.drag(
         find.byKey(const ValueKey('main-pages')),
         const Offset(-650, 0),
@@ -176,7 +176,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-      2,
+      1,
     );
     await tester.tap(find.text('Home'));
     await tester.pumpAndSettle();
@@ -184,12 +184,10 @@ void main() {
       tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
       0,
     );
-    await tester.tap(find.text('Transactions'));
+    await openMenuItem(tester, 'All transactions');
     await tester.pumpAndSettle();
-    expect(
-      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-      3,
-    );
+    expect(find.byType(NavigationBar), findsNothing);
+    expect(find.text('All transactions'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -218,21 +216,18 @@ void main() {
     });
     await tester.pumpWidget(MyApp(store: store));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Transactions'));
+    await openMenuItem(tester, 'All transactions');
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'bread');
     await tester.pumpAndSettle();
-    await tester.tap(find.byType(DropdownButtonFormField<EntryType>));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('expense').last);
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Expense'));
     await tester.pumpAndSettle();
     expect(find.text('Bread'), findsOneWidget);
     expect(find.text('Bread return'), findsNothing);
     expect(find.text('Milk'), findsNothing);
 
-    await tester.tap(find.text('Home'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Transactions'));
+    await openMenuItem(tester, 'Home');
+    await openMenuItem(tester, 'All transactions');
     await tester.pumpAndSettle();
     expect(
       tester.widget<TextField>(find.byType(TextField)).controller!.text,
@@ -247,6 +242,10 @@ void main() {
     await tester.tap(find.byTooltip('Select all visible'));
     await tester.pumpAndSettle();
     expect(find.text('1 selected'), findsOneWidget);
+    await tester.tap(find.byTooltip('Cancel selection'));
+    await tester.pumpAndSettle();
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Overview'));
     await tester.pumpAndSettle();
     expect(find.byTooltip('Cancel selection'), findsNothing);
@@ -259,16 +258,16 @@ void main() {
       await tester.runAsync(prepareAccounts);
       await tester.pumpWidget(MyApp(store: store));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Transactions'));
+      await tester.tap(find.text('Overview'));
       await tester.pumpAndSettle();
       await openMenuItem(tester, 'Reports');
       expect(find.text('Spending by category'), findsOneWidget);
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
-      expect(find.byType(TextField), findsOneWidget);
+      expect(find.text('Monthly overview'), findsOneWidget);
       expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-        3,
+        1,
       );
 
       await openMenuItem(tester, 'Reports');
@@ -310,8 +309,6 @@ void main() {
       await tester.pumpAndSettle();
       await openMenuItem(tester, 'Recurring payments');
       await tester.tap(find.text('Add recurring payment'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byType(DropdownButtonFormField<EntryType>));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Income').last);
       await tester.pumpAndSettle();
@@ -403,7 +400,7 @@ void main() {
       });
       await tester.pumpWidget(MyApp(store: store));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Transactions'));
+      await openMenuItem(tester, 'All transactions');
       await tester.pumpAndSettle();
       for (final type in EntryType.values) {
         final tile = tester.widget<ListTile>(
@@ -422,7 +419,7 @@ void main() {
                 ),
         );
       }
-      expect(find.byType(NavigationDestination), findsNWidgets(4));
+      expect(find.byType(NavigationDestination), findsNothing);
       expect(find.text('Reports'), findsNothing);
       expect(find.text('Accounts'), findsNothing);
       await openMenuItem(tester, 'Reports');
@@ -530,9 +527,7 @@ void main() {
       await tester.pumpWidget(MyApp(store: store));
       await tester.pumpAndSettle();
       await openManualTransaction(tester);
-      await tester.tap(find.byType(DropdownButtonFormField<EntryType>));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('income').last);
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Income'));
       await tester.pumpAndSettle();
       await tester.enterText(
         find.widgetWithText(TextFormField, 'Description / merchant'),
@@ -888,7 +883,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('No expenses or refunds'), findsOneWidget);
       await openManualTransaction(tester);
-      expect(find.text('Currency: €'), findsOneWidget);
+      expect(find.text('Currency: EUR'), findsOneWidget);
       expect(find.byType(DropdownButtonFormField<Currency>), findsNothing);
       expect(find.textContaining('IQD'), findsNothing);
       await tester.tap(find.text('Save transaction'));
@@ -976,6 +971,45 @@ void main() {
           DateTime.now(),
         ),
         0,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'short slow swipes settle to the adjacent main destination in either direction',
+    (tester) async {
+      await tester.runAsync(prepareAccounts);
+      await tester.pumpWidget(MyApp(store: store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Overview'));
+      await tester.pumpAndSettle();
+      final pages = find.byKey(const ValueKey('main-pages'));
+      Future<void> slowSwipe(double dx) async {
+        final gesture = await tester.startGesture(tester.getCenter(pages));
+        for (var i = 1; i <= 5; i++) {
+          await gesture.moveBy(Offset(dx / 5, 0), timeStamp: Duration(milliseconds: i * 100));
+          await tester.pump(const Duration(milliseconds: 100));
+        }
+        await tester.pump(const Duration(milliseconds: 600));
+        await gesture.up(timeStamp: const Duration(milliseconds: 1100));
+        await tester.pumpAndSettle();
+      }
+
+      await slowSwipe(-100);
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        2,
+      );
+      await slowSwipe(100);
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        1,
+      );
+      // A long slow drag must not snap backwards after crossing halfway.
+      await slowSwipe(-550);
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        2,
       );
       expect(tester.takeException(), isNull);
     },

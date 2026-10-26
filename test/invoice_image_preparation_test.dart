@@ -176,4 +176,27 @@ void main() {
       }
     },
   );
+  test(
+    'native downsampling handles oversized rotated scans before JPEG encoding',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'moneva_native_resize_',
+      );
+      final source = File('${directory.path}/rotated.jpg');
+      try {
+        final image = img.decodePng(receiptPng(400, 6400))!;
+        image.exif.imageIfd.orientation = 6;
+        await source.writeAsBytes(img.encodeJpg(image, quality: 90));
+        final prepared = img.decodeJpg(
+          await InvoiceImagePreparation.bytesFor(source),
+        )!;
+        expect(prepared.width, 6000);
+        expect(prepared.height, 375);
+        expect(await source.exists(), isTrue);
+      } finally {
+        await source.delete();
+        await directory.delete();
+      }
+    },
+  );
 }

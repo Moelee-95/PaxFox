@@ -8,6 +8,7 @@ class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
     required this.month,
+    this.currency = Currency.eur,
     required this.summary,
     required this.tab,
     required this.onTabChanged,
@@ -16,6 +17,7 @@ class HomeScreen extends StatefulWidget {
   });
 
   final DateTime month;
+  final Currency currency;
   final MonthlyLedger summary;
   final int tab;
   final ValueChanged<int> onTabChanged;
@@ -56,7 +58,7 @@ class _HomeScreenState extends State<HomeScreen>
   Widget build(BuildContext context) {
     final spending = widget.summary.spendingEntries;
     final income = widget.summary.incomeEntries;
-    final totals = widget.summary.eurTotals;
+    final totals = widget.summary.totalsFor(widget.currency);
     Widget list(String view, List<LedgerEntry> entries, String empty) =>
         ListView.builder(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -122,7 +124,7 @@ class _HomeScreenState extends State<HomeScreen>
                           style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
                         Text(
-                          Currency.eur.display(tab.amount),
+                          widget.currency.display(tab.amount),
                           style: TextStyle(
                             fontWeight: FontWeight.w700,
                             color: tab.color,

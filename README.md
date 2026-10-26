@@ -1,5 +1,7 @@
 # Moneva
 
+For a short AI handoff, start with [AI_CONTEXT.md](AI_CONTEXT.md). The [screen/source map](docs/APP_MAP.md) and [data/workflow reference](docs/DATA_AND_WORKFLOWS.md) provide detail on demand.
+
 An offline Flutter personal finance app. Development follows `Moneva_Codex_Implementation_Prompt.md`; this is the first working implementation, not the completed ten-screen specification.
 
 ## Implemented
@@ -91,7 +93,7 @@ Run the calculation benchmark with `dart run tool/benchmark_ledger.dart`. It che
 
 The database is `moneva.sqlite` in the platform application-support directory returned by `path_provider`. There is no login, backend, analytics or live exchange-rate service. Tapping Extract uploads the selected photos and expense category names to Gemini directly, as requested. There is no upload confirmation dialog or manual-without-upload route. OS backups may include application support data according to platform policy; custom backup/privacy settings are pending. Do not commit financial workbooks, databases or photos. The private workbook name and SQLite artifacts are gitignored. No private workbook was imported or bundled.
 
-Backups, JSON restore, CSV export and XLSX import are **not implemented yet**. Do not use this development build as the only copy of important financial records. There is no in-app export or account reconciliation yet.
+Full backups, JSON restore and XLSX import are **not implemented yet**. CSV import/export is available from the side menu but does not include all application data. Account balance correction exists; a dated reconciliation/audit workflow does not.
 
 ## Financial model
 

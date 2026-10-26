@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/domain/ledger.dart';
+import '../core/presentation/entry_type_picker.dart';
 
 class TransactionsScreen extends StatefulWidget {
   const TransactionsScreen({
@@ -49,26 +50,10 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                 ),
                 onChanged: widget.onSearchChanged,
               ),
-              Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<EntryType>(
-                      initialValue: widget.type,
-                      decoration: const InputDecoration(labelText: 'Type'),
-                      items: [
-                        const DropdownMenuItem(
-                          value: null,
-                          child: Text('All types'),
-                        ),
-                        ...EntryType.values.map(
-                          (t) =>
-                              DropdownMenuItem(value: t, child: Text(t.name)),
-                        ),
-                      ],
-                      onChanged: widget.onTypeChanged,
-                    ),
-                  ),
-                ],
+              EntryTypePicker(
+                value: widget.type,
+                allowAll: true,
+                onChanged: widget.onTypeChanged,
               ),
             ],
           ),

@@ -33,11 +33,27 @@ class _MyAppState extends State<MyApp> {
     theme: ThemeData(
       colorSchemeSeed: const Color(0xFF00796B),
       useMaterial3: true,
+      inputDecorationTheme: const InputDecorationTheme(
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(6)),
+        ),
+        floatingLabelBehavior: FloatingLabelBehavior.always,
+        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+        isDense: false,
+      ),
     ),
     darkTheme: ThemeData(
       colorSchemeSeed: const Color(0xFF00796B),
       brightness: Brightness.dark,
       useMaterial3: true,
+      inputDecorationTheme: const InputDecorationTheme(
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(6)),
+        ),
+        floatingLabelBehavior: FloatingLabelBehavior.always,
+        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+        isDense: false,
+      ),
     ),
     home: FutureBuilder<LedgerStore>(
       future: _store,

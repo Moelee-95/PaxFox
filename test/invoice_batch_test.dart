@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moneva/core/data/ledger_store.dart';
 import 'package:moneva/core/domain/ledger.dart';
@@ -140,4 +142,137 @@ void main() {
       expect(accountBalance(cash, store.entries, DateTime(2026, 1, 2)), 450);
     },
   );
+  test('multiple invoices preserve item dates and validate historical funds as one batch', () async {
+    final early = DateTime(2026, 1, 2), late = DateTime(2026, 2, 2);
+    final batch = InvoiceDraft(
+      merchant: 'Two shops',
+      multipleInvoices: true,
+      currency: 'EUR',
+      total: 400,
+      category: 'Groceries',
+      items: [
+        InvoiceItem(
+          description: 'Early purchase',
+          quantity: '2',
+          total: 500,
+          category: 'Groceries',
+          date: early,
+        ),
+        InvoiceItem(
+          description: 'Early discount',
+          quantity: '1',
+          total: -100,
+          category: 'Groceries',
+          date: early,
+        ),
+        InvoiceItem(
+          description: 'Later purchase',
+          quantity: '1',
+          total: 50,
+          category: 'Groceries',
+          date: late,
+        ),
+        InvoiceItem(
+          description: 'Later return',
+          quantity: '1',
+          total: -50,
+          category: 'Groceries',
+          date: late,
+        ),
+      ],
+    );
+    final before = DateTime.now().toUtc();
+    await store.saveInvoiceBatch(
+      draft: batch,
+      accountId: cash.id!,
+      imagePaths: [],
+    );
+    expect(store.entries, hasLength(5));
+    expect(store.entries.where((entry) => entry.date == early), hasLength(3));
+    expect(store.entries.where((entry) => entry.date == late), hasLength(2));
+    expect(store.currentBalances.wealth, 50);
+    for (final entry in store.entries) {
+      expect(entry.createdAt!.isUtc, isTrue);
+      expect(entry.createdAt!.isBefore(before), isFalse);
+    }
+    final source = await store.scannedInvoiceFor(store.entries.first.id!);
+    final restored = InvoiceDraft.fromMap(
+      jsonDecode(source!['draft'] as String) as Map<String, dynamic>,
+    );
+    expect(restored.multipleInvoices, isTrue);
+    expect(restored.items.last.date, late);
+  });
+
+  test(
+    'a later invoice refund cannot cover an earlier historical deficit',
+    () async {
+      final batch = InvoiceDraft(
+        merchant: 'Two shops',
+        multipleInvoices: true,
+        currency: 'EUR',
+        total: 400,
+        category: 'Groceries',
+        items: [
+          InvoiceItem(
+            description: 'Purchase',
+            quantity: '1',
+            total: 500,
+            category: 'Groceries',
+            date: DateTime(2026, 1, 2),
+          ),
+          InvoiceItem(
+            description: 'Later return',
+            quantity: '1',
+            total: -100,
+            category: 'Groceries',
+            date: DateTime(2026, 2, 2),
+          ),
+        ],
+      );
+      await expectLater(
+        store.saveInvoiceBatch(
+          draft: batch,
+          accountId: cash.id!,
+          imagePaths: [],
+        ),
+        throwsArgumentError,
+      );
+      expect(store.entries, isEmpty);
+      expect(await store.db.query('scanned_invoices'), isEmpty);
+      expect(await store.db.query('receipt_items'), isEmpty);
+    },
+  );
+
+  test('multi-invoice parser does not fill an unreadable date from another invoice', () {
+    final batch = parseInvoice(
+      jsonEncode({
+        'multiple_invoices': true,
+        'merchant': 'Two shops',
+        'date': '2026-01-02',
+        'currency': 'EUR',
+        'total': '3.00',
+        'category': 'Groceries',
+        'items': [
+          {
+            'description': 'First',
+            'quantity': '1',
+            'line_total': '1.00',
+            'category': 'Groceries',
+            'date': '2026-01-02',
+          },
+          {
+            'description': 'Second',
+            'quantity': '1',
+            'line_total': '2.00',
+            'category': 'Groceries',
+            'date': null,
+          },
+        ],
+      }),
+      {'Groceries'},
+    );
+    expect(batch.items.first.date, DateTime(2026, 1, 2));
+    expect(batch.items.last.date, isNull);
+    expect(() => validateInvoice(batch, {'Groceries'}), throwsArgumentError);
+  });
 }

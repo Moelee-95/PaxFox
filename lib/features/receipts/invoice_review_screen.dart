@@ -31,6 +31,7 @@ class InvoiceReviewScreen extends StatefulWidget {
 
 class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
   final form = GlobalKey<FormState>();
+  Currency get currency => widget.store.currency;
   late final TextEditingController merchant;
   late List<InvoiceItem> items;
   DateTime? date;
@@ -46,7 +47,15 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
     merchant = TextEditingController(
       text: widget.entry?.description ?? draft.merchant,
     );
-    items = expandInvoiceItems(draft.items);
+    items = expandInvoiceItems(
+      draft.items
+          .map(
+            (item) => item.withDate(
+              item.date ?? (draft.multipleInvoices ? null : draft.date),
+            ),
+          )
+          .toList(),
+    );
     if ((draft.adjustment ?? 0) != 0) {
       items.add(
         InvoiceItem(
@@ -57,13 +66,14 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
           total: draft.adjustment,
           category: draft.category,
           edited: true,
+          date: draft.date,
         ),
       );
     }
-    date = widget.entry?.date ?? draft.date;
+    date = widget.entry?.date ?? (draft.multipleInvoices ? null : draft.date);
     category = widget.entry?.category ?? draft.category;
     accountId = widget.entry?.accountId;
-    euroConfirmed = draft.currency?.trim().toUpperCase() == 'EUR';
+    euroConfirmed = draft.currency?.trim().toUpperCase() == currency.code;
   }
 
   @override
@@ -77,6 +87,8 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
       context: context,
       builder: (_) => InvoiceItemDialog(
         item: index == null ? null : items[index],
+        initialDate: date,
+        currency: currency,
         categories: widget.store
             .categoriesFor(EntryType.expense)
             .map((c) => c.name)
@@ -104,7 +116,9 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
         .map((c) => c.name)
         .toSet();
     final hasItemErrors = items.any(
-      (item) => invoiceItemError(item, availableCategories) != null,
+      (item) =>
+          invoiceItemError(item, availableCategories) != null ||
+          (item.date == null && widget.entry == null),
     );
     final validForm = form.currentState!.validate();
     if (hasItemErrors || !validForm) {
@@ -118,8 +132,9 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
     try {
       final draft = InvoiceDraft(
         merchant: merchant.text.trim(),
+        multipleInvoices: widget.draft.multipleInvoices,
         date: date,
-        currency: 'EUR',
+        currency: currency.code,
         total: items.fold<int>(0, (sum, item) => sum + (item.total ?? 0)),
         category: category,
         adjustment: 0,
@@ -132,6 +147,7 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
             .categoriesFor(EntryType.expense)
             .map((c) => c.name)
             .toSet(),
+        currency: currency,
       );
       retained = await InvoiceImages().retain(widget.images);
       if (widget.entry == null) {
@@ -184,7 +200,7 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
           actions: [
             InfoButton(
               title: 'Invoice review information',
-              message: 'Review the extracted items. Each item saves as a separate transaction with its own description, price and category, using the date and payment account below. Discounts save as refunds. All items are saved together. The saved total is the sum of the reviewed items; check them against the original invoice.',
+              message: 'Review the extracted items. Each item saves as a separate transaction with its own description, price and category, using its own date and the payment account below. Discounts save as refunds. All items are saved together. The saved total is the sum of the reviewed items; check them against the original invoice.',
               details: widget.draft.raw.isEmpty
                   ? null
                   : ExpansionTile(
@@ -258,17 +274,17 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
                         )
                       : const SizedBox(height: 30),
                 ),
-              if (widget.draft.currency?.trim().toUpperCase() != 'EUR')
+              if (widget.draft.currency?.trim().toUpperCase() != currency.code)
                 Text(
-                  'Detected currency: ${widget.draft.currency ?? 'unknown'}. Only EUR invoices can be saved. Do not relabel a foreign-currency amount.',
+                  'Detected currency: ${widget.draft.currency ?? 'unknown'}. Only ${currency.code} invoices can be saved. Do not relabel a foreign-currency amount.',
                 ),
-              if (widget.draft.currency?.trim().toUpperCase() != 'EUR')
+              if (widget.draft.currency?.trim().toUpperCase() != currency.code)
                 FormField<bool>(
                   initialValue: euroConfirmed,
                   autovalidateMode: AutovalidateMode.onUserInteraction,
                   validator: (_) => euroConfirmed
                       ? null
-                      : 'Confirm that the original invoice is in EUR.',
+                      : 'Confirm that the original invoice is in ${currency.code}.',
                   builder: (field) => InputDecorator(
                     decoration: InputDecoration(
                       border: InputBorder.none,
@@ -276,7 +292,9 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
                     ),
                     child: CheckboxListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('I confirm this invoice is in EUR'),
+                      title: Text(
+                        'I confirm this invoice is in ${currency.code}',
+                      ),
                       value: euroConfirmed,
                       onChanged: busy
                           ? null
@@ -296,42 +314,43 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
                 validator: (s) =>
                     s == null || s.trim().isEmpty ? 'Enter a merchant.' : null,
               ),
-              FormField<DateTime>(
-                initialValue: date,
-                autovalidateMode: AutovalidateMode.onUserInteraction,
-                validator: (_) => date == null
-                    ? 'Choose the invoice date. It could not be determined from the scan.'
-                    : null,
-                builder: (field) => InputDecorator(
-                  decoration: InputDecoration(
-                    border: InputBorder.none,
-                    errorText: field.errorText,
-                  ),
-                  child: ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(
-                      date == null
-                          ? 'Invoice date: choose date'
-                          : 'Invoice date: ${dayKey(date!)}',
+              if (widget.entry != null)
+                FormField<DateTime>(
+                  initialValue: date,
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
+                  validator: (_) => date == null
+                      ? 'Choose the invoice date. It could not be determined from the scan.'
+                      : null,
+                  builder: (field) => InputDecorator(
+                    decoration: InputDecoration(
+                      border: InputBorder.none,
+                      errorText: field.errorText,
                     ),
-                    trailing: const Icon(Icons.calendar_today),
-                    onTap: busy
-                        ? null
-                        : () async {
-                            final chosen = await showDatePicker(
-                              context: context,
-                              initialDate: date ?? DateTime.now(),
-                              firstDate: DateTime(1900),
-                              lastDate: DateTime(2100),
-                            );
-                            if (chosen != null && mounted) {
-                              setState(() => date = chosen);
-                              field.didChange(chosen);
-                            }
-                          },
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        date == null
+                            ? 'Invoice date: choose date'
+                            : 'Invoice date: ${dayKey(date!)}',
+                      ),
+                      trailing: const Icon(Icons.calendar_today),
+                      onTap: busy
+                          ? null
+                          : () async {
+                              final chosen = await showDatePicker(
+                                context: context,
+                                initialDate: date ?? DateTime.now(),
+                                firstDate: DateTime(1900),
+                                lastDate: DateTime(2100),
+                              );
+                              if (chosen != null && mounted) {
+                                setState(() => date = chosen);
+                                field.didChange(chosen);
+                              }
+                            },
+                    ),
                   ),
                 ),
-              ),
               DropdownButtonFormField<String>(
                 initialValue: names.contains(category) ? category : null,
                 decoration: const InputDecoration(
@@ -369,7 +388,8 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
                   key: ValueKey('invoice-item-$i'),
                   shape:
                       showItemErrors &&
-                          invoiceItemError(items[i], names.toSet()) != null
+                          (invoiceItemError(items[i], names.toSet()) != null ||
+                              (items[i].date == null && widget.entry == null))
                       ? RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                           side: BorderSide(
@@ -388,14 +408,16 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
                               ? 'Missing item name'
                               : items[i].description,
                         ),
-                        subtitle: Text(items[i].category ?? 'Choose category'),
+                        subtitle: Text(
+                          '${items[i].category ?? 'Choose category'} · ${items[i].date == null ? 'Choose date' : dayKey(items[i].date!)}',
+                        ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
                               items[i].total == null
                                   ? 'Check price'
-                                  : '€${Currency.eur.format(items[i].total!)}',
+                                  : currency.display(items[i].total!),
                             ),
                             IconButton(
                               tooltip: 'Delete item',
@@ -408,11 +430,13 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
                         ),
                       ),
                       if (showItemErrors &&
-                          invoiceItemError(items[i], names.toSet()) != null)
+                          (invoiceItemError(items[i], names.toSet()) != null ||
+                              (items[i].date == null && widget.entry == null)))
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                           child: Text(
-                            invoiceItemError(items[i], names.toSet())!,
+                            invoiceItemError(items[i], names.toSet()) ??
+                                'Choose the date for this item.',
                             style: TextStyle(
                               color: Theme.of(context).colorScheme.error,
                             ),
@@ -426,7 +450,7 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
                 icon: const Icon(Icons.add),
                 label: const Text('Add item'),
               ),
-              Text('Items total: ${Currency.eur.display(sum)}'),
+              Text('Items total: ${currency.display(sum)}'),
               if (error != null)
                 Text(
                   error!,
@@ -442,7 +466,15 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
 }
 
 class InvoiceItemDialog extends StatefulWidget {
-  const InvoiceItemDialog({super.key, this.item, required this.categories});
+  const InvoiceItemDialog({
+    super.key,
+    this.item,
+    required this.categories,
+    this.currency = Currency.eur,
+    this.initialDate,
+  });
+  final Currency currency;
+  final DateTime? initialDate;
   final InvoiceItem? item;
   final List<String> categories;
   @override
@@ -457,9 +489,10 @@ class _InvoiceItemDialogState extends State<InvoiceItemDialog> {
       price = TextEditingController(
         text: widget.item?.total == null
             ? ''
-            : Currency.eur.format(widget.item!.total!),
+            : widget.currency.format(widget.item!.total!),
       );
   late String? category = widget.item?.category;
+  late DateTime? date = widget.item?.date ?? widget.initialDate;
   @override
   void dispose() {
     name.dispose();
@@ -469,7 +502,7 @@ class _InvoiceItemDialogState extends State<InvoiceItemDialog> {
 
   int signed(String value) {
     final text = value.trim();
-    return Currency.eur.parse(text.replaceFirst(RegExp(r'^-'), '')) *
+    return widget.currency.parse(text.replaceFirst(RegExp(r'^-'), '')) *
         (text.startsWith('-') ? -1 : 1);
   }
 
@@ -488,9 +521,12 @@ class _InvoiceItemDialogState extends State<InvoiceItemDialog> {
               validator: (s) =>
                   s == null || s.trim().isEmpty ? 'Enter a name.' : null,
             ),
+            const SizedBox(height: 16),
             TextFormField(
               controller: price,
-              decoration: const InputDecoration(labelText: 'Price (€)'),
+              decoration: InputDecoration(
+                labelText: 'Price (${widget.currency.symbol.trim()})',
+              ),
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
                 signed: true,
@@ -504,6 +540,35 @@ class _InvoiceItemDialogState extends State<InvoiceItemDialog> {
                 return null;
               },
             ),
+            const SizedBox(height: 16),
+            FormField<DateTime>(
+              initialValue: date,
+              validator: (_) => date == null ? 'Choose an item date.' : null,
+              builder: (field) => InputDecorator(
+                decoration: InputDecoration(
+                  labelText: 'Invoice date',
+                  errorText: field.errorText,
+                ),
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(date == null ? 'Choose date' : dayKey(date!)),
+                  trailing: const Icon(Icons.calendar_today),
+                  onTap: () async {
+                    final chosen = await showDatePicker(
+                      context: context,
+                      initialDate: date ?? DateTime.now(),
+                      firstDate: DateTime(1900),
+                      lastDate: DateTime(2100),
+                    );
+                    if (chosen != null && mounted) {
+                      setState(() => date = chosen);
+                      field.didChange(chosen);
+                    }
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
             DropdownButtonFormField<String>(
               initialValue: widget.categories.contains(category)
                   ? category
@@ -535,6 +600,7 @@ class _InvoiceItemDialogState extends State<InvoiceItemDialog> {
                 total: signed(price.text),
                 category: category,
                 edited: true,
+                date: date,
               ),
             );
           }

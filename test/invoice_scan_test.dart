@@ -25,6 +25,12 @@ class ControlledExtractor implements InvoiceExtractor {
 
 class ControlledImagePreparation extends InvoiceImagePreparation {
   final sources = <File>[];
+  final released = <File>[];
+  @override
+  Future<void> release(File file) async {
+    released.add(file);
+  }
+
   final result = Completer<File>();
   @override
   Future<File> prepare(File source) {
@@ -113,6 +119,8 @@ void main() {
           ),
         ),
       );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Add pages'));
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Scan more pages'));
       await tester.pump();
@@ -212,6 +220,80 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Review invoice'), findsNothing);
       expect(store.entries, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'stalled image preparation times out, allows retry and releases a late file',
+    (tester) async {
+      const channel = MethodChannel('cunning_document_scanner');
+      final preparation = ControlledImagePreparation();
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        (_) async => ['slow-original.jpg'],
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: InvoiceScanScreen(
+            store: store,
+            imagePreparation: preparation,
+            preparationTimeout: const Duration(seconds: 2),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Optimizing image 1 of 1'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(find.textContaining('optimization timed out'), findsOneWidget);
+      expect(
+        tester
+            .widget<TextButton>(find.widgetWithText(TextButton, 'Add pages'))
+            .onPressed,
+        isNotNull,
+      );
+      preparation.result.complete(File('late-prepared.jpg'));
+      await tester.pumpAndSettle();
+      expect(find.text('Page 1'), findsNothing);
+      expect(preparation.released.single.path, 'late-prepared.jpg');
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'cancel preparation immediately restores controls and ignores the unfinished page',
+    (tester) async {
+      const channel = MethodChannel('cunning_document_scanner');
+      final preparation = ControlledImagePreparation();
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        (_) async => ['slow-original.jpg'],
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: InvoiceScanScreen(store: store, imagePreparation: preparation),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text('Cancel preparation'));
+      await tester.pumpAndSettle();
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+      preparation.result.complete(File('cancelled-prepared.jpg'));
+      await tester.pumpAndSettle();
+      expect(find.text('Page 1'), findsNothing);
+      expect(preparation.released.single.path, 'cancelled-prepared.jpg');
       expect(tester.takeException(), isNull);
     },
   );

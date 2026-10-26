@@ -66,7 +66,7 @@ void main() {
       );
       expect(
         find.text(
-          'Choose the invoice date. It could not be determined from the scan.',
+          'Choose the date for this item.',
         ),
         findsOneWidget,
       );
@@ -88,7 +88,7 @@ void main() {
       );
       expect(
         find.text(
-          'Choose the invoice date. It could not be determined from the scan.',
+          'Choose the date for this item.',
         ),
         findsOneWidget,
       );
@@ -150,7 +150,7 @@ void main() {
       expect(
         find.descendant(
           of: invalid,
-          matching: find.textContaining('Enter a valid price in EUR.'),
+          matching: find.textContaining('Enter a valid price.'),
         ),
         findsOneWidget,
       );

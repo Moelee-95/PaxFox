@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../core/data/ledger_store.dart';
-import '../core/domain/ledger.dart';
 import '../core/domain/ledger_queries.dart';
 import '../core/presentation/account_balance_card.dart';
 import '../core/presentation/metric_card.dart';
@@ -24,11 +23,11 @@ class OverviewScreen extends StatelessWidget {
   final String? recurringError;
 
   Widget _monthlyOverview(BuildContext context) {
-    final monthly = summary.eurTotals;
+    final monthly = summary.totalsFor(store.currency);
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final balances = store.currentBalances;
-    final wealth = balances.wealth;
+    final wealth = store.netWealth;
     final available = balances.available;
     final blocked = balances.blocked;
     return Column(
@@ -63,7 +62,7 @@ class OverviewScreen extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Text(
-                'Net cashflow: ${Currency.eur.display(monthly.net)}',
+                'Net cashflow: ${store.currency.display(monthly.net)}',
                 style: theme.textTheme.headlineSmall?.copyWith(
                   color: colors.onPrimaryContainer,
                   fontWeight: FontWeight.w700,
@@ -81,13 +80,13 @@ class OverviewScreen extends StatelessWidget {
         const SizedBox(height: 10),
         ResponsivePair(
           left: MetricCard(
-            text: 'Income: ${Currency.eur.display(monthly.income)}',
+            text: 'Income: ${store.currency.display(monthly.income)}',
             icon: Icons.payments_outlined,
             color: Colors.green,
           ),
           right: MetricCard(
             text:
-                'Spending after refunds: ${Currency.eur.display(monthly.spending)}',
+                'Spending after refunds: ${store.currency.display(monthly.spending)}',
             icon: Icons.shopping_bag_outlined,
             color: Colors.red,
           ),
@@ -95,23 +94,27 @@ class OverviewScreen extends StatelessWidget {
         const SizedBox(height: 10),
         ResponsivePair(
           left: MetricCard(
-            text: 'Account wealth: €${Currency.eur.format(wealth)}',
+            text:
+                'Account wealth: ${store.currency.symbol}${store.currency.format(wealth)}',
+            detail:
+                'Outstanding debts: ${store.currency.display(store.totalDebt)}',
             icon: Icons.account_balance_outlined,
             color: colors.primary,
           ),
           right: MetricCard(
-            text: 'Available to spend: €${Currency.eur.format(available)}',
+            text:
+                'Available to spend: ${store.currency.symbol}${store.currency.format(available)}',
             icon: Icons.account_balance_wallet_outlined,
             color: colors.primary,
             detail:
-                'Excludes blocked accounts: €${Currency.eur.format(blocked)}',
+                'Excludes blocked accounts: ${store.currency.symbol}${store.currency.format(blocked)}',
           ),
         ),
         if (store.hasLegacyCurrencyData)
           const Padding(
             padding: EdgeInsets.only(top: 12),
             child: Text(
-              'Existing non-EUR data is preserved and excluded from these totals.',
+              'Existing data in other currencies is preserved and excluded from these totals.',
             ),
           ),
       ],
