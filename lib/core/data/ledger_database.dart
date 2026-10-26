@@ -19,7 +19,7 @@ class LedgerDatabase {
     final db = await (factory ?? databaseFactorySqflitePlugin).openDatabase(
       location,
       options: OpenDatabaseOptions(
-        version: 10,
+        version: 11,
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) {
             await db.execute(
@@ -49,6 +49,9 @@ class LedgerDatabase {
           }
           if (oldVersion < 10) {
             await _createInvoiceBatches(db);
+          }
+          if (oldVersion < 11) {
+            await _addRecurringClassification(db);
           }
         },
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
@@ -80,6 +83,7 @@ class LedgerDatabase {
           await _addRecurringTypes(db);
           await _createReceipts(db);
           await _createInvoiceBatches(db);
+          await _addRecurringClassification(db);
         },
       ),
     );
@@ -94,6 +98,14 @@ class LedgerDatabase {
     await db.execute(
       "UPDATE accounts SET allow_overdraft = 1 WHERE kind = 'bank'",
     );
+  }
+
+  static Future<void> _addRecurringClassification(DatabaseExecutor db) async {
+    for (final column in ['is_asset', 'is_liability']) {
+      await db.execute(
+        'ALTER TABLE recurring_rules ADD COLUMN $column INTEGER NOT NULL DEFAULT 0 CHECK($column IN (0,1))',
+      );
+    }
   }
 
   static Future<void> _upgradeAccounts(DatabaseExecutor db) async {

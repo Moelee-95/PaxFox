@@ -43,9 +43,12 @@ class TransactionTile extends StatelessWidget {
     ),
     title: Text(entry.description),
     subtitle: Text(
-      compact
-          ? dayKey(entry.date)
-          : '${dayKey(entry.date)} · ${entry.type.name} · ${entry.category}',
+      (compact
+              ? dayKey(entry.date)
+              : '${dayKey(entry.date)} · ${entry.type.name} · ${entry.category}') +
+          (entry.createdAt == null
+              ? ''
+              : '\nAdded ${creationTimestamp(context, entry.createdAt!)}'),
     ),
     trailing: Row(
       mainAxisSize: MainAxisSize.min,
@@ -61,4 +64,10 @@ class TransactionTile extends StatelessWidget {
       ],
     ),
   );
+}
+
+String creationTimestamp(BuildContext context, DateTime timestamp) {
+  final local = timestamp.toLocal();
+  final locale = MaterialLocalizations.of(context);
+  return '${locale.formatCompactDate(local)} ${locale.formatTimeOfDay(TimeOfDay.fromDateTime(local), alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context))}';
 }

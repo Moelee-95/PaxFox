@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moneva/core/data/ledger_store.dart';
 import 'package:moneva/core/domain/ledger.dart';
+import 'package:moneva/core/presentation/account_picker.dart';
 import 'package:moneva/features/receipts/invoice.dart';
 import 'package:moneva/features/receipts/invoice_review_screen.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -207,9 +208,14 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(store.entries, isEmpty);
-      await tester.tap(find.byType(DropdownButtonFormField<int>));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Cash').last);
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byType(AccountPicker),
+              matching: find.text('Cash'),
+            )
+            .first,
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Milk'));
       await tester.pumpAndSettle();
@@ -223,20 +229,6 @@ void main() {
       );
       await tester.tap(find.text('Apply item'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Save transactions'));
-      await tester.runAsync(() async {
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-      });
-      await tester.pumpAndSettle();
-      expect(store.entries, isEmpty);
-      expect(
-        find.textContaining('Item totals plus adjustment'),
-        findsOneWidget,
-      );
-      await tester.enterText(
-        find.widgetWithText(TextFormField, 'Charged total (€)'),
-        '12',
-      );
       await tester.tap(find.text('Save transactions'));
       await tester.runAsync(() async {
         await Future<void>.delayed(const Duration(milliseconds: 100));

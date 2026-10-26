@@ -47,7 +47,7 @@ void main() {
         factory: databaseFactoryFfi,
       );
       expect(migrated.entries.single.amount, 1234);
-      expect(await migrated.db.getVersion(), 10);
+      expect(await migrated.db.getVersion(), 11);
       expect(migrated.setupCompleted, isFalse);
       await migrated.completeSetup([
         Account(

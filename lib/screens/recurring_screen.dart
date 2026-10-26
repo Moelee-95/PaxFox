@@ -4,6 +4,15 @@ import '../core/data/ledger_store.dart';
 import '../core/domain/ledger.dart';
 import '../core/domain/recurring.dart';
 import '../core/presentation/confirmation_dialog.dart';
+import '../core/presentation/info_button.dart';
+import '../core/presentation/ledger_refresh.dart';
+
+const _recurringInfo =
+    'Monthly expenses and income are posted automatically when you open or resume Moneva. Missed due dates are caught up. No bank connection: this updates your local ledger, not your real bank. Days 29-31 use the last day in shorter months. No weekend adjustment.';
+const _recurringHistoryInfo =
+    'Unpaid occurrences keep their original amount and account. Retry books the payment on today\'s date and preserves its scheduled due date in this history. Editing a rule affects future occurrences only. If a posted payment is edited or deleted in Transactions, it is never automatically recreated.';
+const _recurringFormInfo =
+    'Expenses and income repeat monthly in EUR. Future changes do not alter already posted payments or unpaid bills. Choose a start date today or later; past transactions do not create recurring rules.';
 
 class RecurringScreen extends StatefulWidget {
   const RecurringScreen({super.key, required this.store});
@@ -61,6 +70,10 @@ class _RecurringScreenState extends State<RecurringScreen> {
     appBar: AppBar(
       title: const Text('Recurring payments'),
       actions: [
+        InfoButton(
+          title: 'Recurring payments information',
+          message: '$_recurringInfo\n\n$_recurringHistoryInfo',
+        ),
         IconButton(
           tooltip: 'Check due payments',
           onPressed: busy
@@ -75,150 +88,150 @@ class _RecurringScreenState extends State<RecurringScreen> {
       icon: const Icon(Icons.add),
       label: const Text('Add recurring payment'),
     ),
-    body: ListenableBuilder(
-      listenable: widget.store,
-      builder: (context, _) => ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-        children: [
-          const Text(
-            'Monthly expenses and income are posted automatically when you open or resume Moneva. Missed due dates are caught up. No bank connection: this updates your local ledger, not your real bank. Days 29-31 use the last day in shorter months. No weekend adjustment.',
-          ),
-          if (error != null)
-            Text(
-              error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          if (widget.store.recurringRules.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(24),
-              child: Text(
-                'No recurring payments yet. Add rent, subscriptions, salary or another monthly entry.',
+    body: LedgerRefresh(
+      store: widget.store,
+      child: ListenableBuilder(
+        listenable: widget.store,
+        builder: (context, _) => ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+          children: [
+            if (error != null)
+              Text(
+                error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
-            ),
-          for (final rule in widget.store.recurringRules)
-            Card(
-              child: Column(
-                children: [
-                  ListTile(
-                    onTap: busy ? null : () => edit(rule),
-                    title: Text(rule.description),
-                    leading: Icon(
-                      rule.type == EntryType.income
-                          ? Icons.payments_outlined
-                          : Icons.receipt_long_outlined,
-                      color: rule.type == EntryType.income
-                          ? Colors.green
-                          : Colors.red,
-                    ),
-                    subtitle: Text(
-                      '${rule.type == EntryType.income ? 'Income' : 'Expense'} - €${Currency.eur.format(rule.amount)} - ${widget.store.accounts.where((a) => a.id == rule.accountId).firstOrNull?.name ?? 'Account unavailable'}\n${rule.active ? 'Next' : 'Paused; scheduled'}: ${dayKey(rule.nextDate)} - every ${rule.interval} month(s), day ${rule.day}',
-                    ),
-                    isThreeLine: true,
-                    trailing: const Icon(Icons.edit_outlined),
-                  ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(
-                        onPressed: busy
-                            ? null
-                            : () => action(
-                                () => widget.store.setRecurringActive(
-                                  rule.id!,
-                                  !rule.active,
-                                ),
-                              ),
-                        child: Text(rule.active ? 'Pause' : 'Resume'),
-                      ),
-                      TextButton(
-                        onPressed: busy ? null : () => remove(rule),
-                        child: const Text('Delete'),
-                      ),
-                    ],
-                  ),
-                ],
+            if (widget.store.recurringRules.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: Text(
+                  'No recurring payments yet. Add rent, subscriptions, salary or another monthly entry.',
+                ),
               ),
-            ),
-          const SizedBox(height: 16),
-          Text(
-            'History & pending entries',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          for (final occurrence in widget.store.recurringOccurrences.take(100))
-            Card(
-              child: Column(
-                children: [
-                  ListTile(
-                    title: Text(
-                      '${occurrence.description} - €${Currency.eur.format(occurrence.amount)}',
+            for (final rule in widget.store.recurringRules)
+              Card(
+                child: Column(
+                  children: [
+                    ListTile(
+                      onTap: busy ? null : () => edit(rule),
+                      title: Text(rule.description),
+                      leading: Icon(
+                        rule.type == EntryType.income
+                            ? Icons.payments_outlined
+                            : Icons.receipt_long_outlined,
+                        color: rule.type == EntryType.income
+                            ? Colors.green
+                            : Colors.red,
+                      ),
+                      subtitle: Text(
+                        '${rule.type == EntryType.income ? 'Income' : 'Expense'} - €${Currency.eur.format(rule.amount)} - ${widget.store.accounts.where((a) => a.id == rule.accountId).firstOrNull?.name ?? 'Account unavailable'}\n${rule.active ? 'Next' : 'Paused; scheduled'}: ${dayKey(rule.nextDate)} - every ${rule.interval} month(s), day ${rule.day}',
+                      ),
+                      isThreeLine: true,
+                      trailing: const Icon(Icons.edit_outlined),
                     ),
-                    subtitle: Text(
-                      '${occurrence.type.name} - ${dayKey(occurrence.date)} - ${occurrence.status == 'posted' && occurrence.transactionId == null ? 'Posted, then deleted manually' : occurrence.status}${occurrence.error == null ? '' : '\n${occurrence.error}'}',
-                    ),
-                  ),
-                  if (occurrence.status == 'failed')
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          TextButton(
-                            onPressed: busy
-                                ? null
-                                : () => action(
-                                    () => widget.store.retryRecurring(
-                                      occurrence.id,
-                                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: busy
+                              ? null
+                              : () => action(
+                                  () => widget.store.setRecurringActive(
+                                    rule.id!,
+                                    !rule.active,
                                   ),
-                            child: const Text('Retry posting'),
-                          ),
-                          TextButton(
-                            onPressed: busy
-                                ? null
-                                : () async {
-                                    final yes = await showDialog<bool>(
-                                      context: context,
-                                      builder: (context) => AlertDialog(
-                                        title: const Text(
-                                          'Skip this unpaid payment?',
-                                        ),
-                                        content: const Text(
-                                          'No transaction will be posted. Future scheduled payments are unchanged.',
-                                        ),
-                                        actions: [
-                                          TextButton(
-                                            onPressed: () =>
-                                                Navigator.pop(context, false),
-                                            child: const Text('Cancel'),
-                                          ),
-                                          FilledButton(
-                                            onPressed: () =>
-                                                Navigator.pop(context, true),
-                                            child: const Text('Skip'),
-                                          ),
-                                        ],
+                                ),
+                          child: Text(rule.active ? 'Pause' : 'Resume'),
+                        ),
+                        TextButton(
+                          onPressed: busy ? null : () => remove(rule),
+                          child: const Text('Delete'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 16),
+            Text(
+              'History & pending entries',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            for (final occurrence in widget.store.recurringOccurrences.take(
+              100,
+            ))
+              Card(
+                child: Column(
+                  children: [
+                    ListTile(
+                      title: Text(
+                        '${occurrence.description} - €${Currency.eur.format(occurrence.amount)}',
+                      ),
+                      subtitle: Text(
+                        '${occurrence.type.name} - ${dayKey(occurrence.date)} - ${occurrence.status == 'posted' && occurrence.transactionId == null ? 'Posted, then deleted manually' : occurrence.status}${occurrence.error == null ? '' : '\n${occurrence.error}'}',
+                      ),
+                    ),
+                    if (occurrence.status == 'failed')
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            TextButton(
+                              onPressed: busy
+                                  ? null
+                                  : () => action(
+                                      () => widget.store.retryRecurring(
+                                        occurrence.id,
                                       ),
-                                    );
-                                    if (yes == true) {
-                                      await action(
-                                        () => widget.store.skipRecurring(
-                                          occurrence.id,
+                                    ),
+                              child: const Text('Retry posting'),
+                            ),
+                            TextButton(
+                              onPressed: busy
+                                  ? null
+                                  : () async {
+                                      final yes = await showDialog<bool>(
+                                        context: context,
+                                        builder: (context) => AlertDialog(
+                                          title: const Text(
+                                            'Skip this unpaid payment?',
+                                          ),
+                                          content: const Text(
+                                            'No transaction will be posted. Future scheduled payments are unchanged.',
+                                          ),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () =>
+                                                  Navigator.pop(context, false),
+                                              child: const Text('Cancel'),
+                                            ),
+                                            FilledButton(
+                                              onPressed: () =>
+                                                  Navigator.pop(context, true),
+                                              child: const Text('Skip'),
+                                            ),
+                                          ],
                                         ),
                                       );
-                                    }
-                                  },
-                            child: const Text('Skip'),
-                          ),
-                        ],
+                                      if (yes == true) {
+                                        await action(
+                                          () => widget.store.skipRecurring(
+                                            occurrence.id,
+                                          ),
+                                        );
+                                      }
+                                    },
+                              child: const Text('Skip'),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          const Text(
-            'Unpaid occurrences keep their original amount and account. Retry books the payment on today\'s date and preserves its scheduled due date in this history. Editing a rule affects future occurrences only. If a posted payment is edited or deleted in Transactions, it is never automatically recreated.',
-          ),
-        ],
+          ],
+        ),
       ),
     ),
   );
@@ -242,6 +255,7 @@ class _RecurringFormState extends State<RecurringForm> {
   late DateTime start;
   DateTime? end;
   bool busy = false;
+  late bool isAsset, isLiability;
   String? error;
   @override
   void initState() {
@@ -253,6 +267,8 @@ class _RecurringFormState extends State<RecurringForm> {
     );
     interval = TextEditingController(text: '${rule?.interval ?? 1}');
     type = rule?.type ?? EntryType.expense;
+    isAsset = rule?.isAsset ?? false;
+    isLiability = rule?.isLiability ?? false;
     accountId = rule?.accountId;
     category = rule?.category;
     start = rule?.nextDate ?? dateOnly(DateTime.now());
@@ -281,6 +297,8 @@ class _RecurringFormState extends State<RecurringForm> {
         RecurringRule(
           id: widget.rule?.id,
           type: type,
+          isAsset: type == EntryType.income && isAsset,
+          isLiability: type == EntryType.expense && isLiability,
           description: description.text.trim(),
           amount: Currency.eur.parse(amount.text),
           category: category!,
@@ -322,15 +340,18 @@ class _RecurringFormState extends State<RecurringForm> {
               ? 'Add recurring payment'
               : 'Edit recurring payment',
         ),
+        actions: const [
+          InfoButton(
+            title: 'Recurring schedule information',
+            message: _recurringFormInfo,
+          ),
+        ],
       ),
       body: Form(
         key: form,
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            const Text(
-              'Expenses and income repeat monthly in EUR. Future changes do not alter already posted payments or unpaid bills. Choose a start date today or later; past transactions do not create recurring rules.',
-            ),
             DropdownButtonFormField<EntryType>(
               initialValue: type,
               decoration: const InputDecoration(labelText: 'Recurring type'),
@@ -350,6 +371,22 @@ class _RecurringFormState extends State<RecurringForm> {
                       type = value!;
                       category = null;
                       accountId = null;
+                      isAsset = false;
+                      isLiability = false;
+                    }),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(type == EntryType.income ? 'Asset' : 'Liability'),
+              value: type == EntryType.income ? isAsset : isLiability,
+              onChanged: busy
+                  ? null
+                  : (value) => setState(() {
+                      if (type == EntryType.income) {
+                        isAsset = value;
+                      } else {
+                        isLiability = value;
+                      }
                     }),
             ),
             TextFormField(

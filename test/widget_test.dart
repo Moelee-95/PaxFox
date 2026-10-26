@@ -7,6 +7,7 @@ import 'package:moneva/core/domain/freedom.dart';
 import 'package:moneva/core/domain/recurring.dart';
 import 'package:moneva/core/domain/category.dart';
 import 'package:moneva/core/presentation/category_icons.dart';
+import 'package:moneva/core/presentation/account_picker.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -14,6 +15,22 @@ void main() {
     await tester.tap(find.byTooltip('Open menu'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(ListTile, label));
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> openManualTransaction(WidgetTester tester) async {
+    await tester.tap(find.byTooltip('Add transaction'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add manually'));
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> selectAccount(WidgetTester tester, String name) async {
+    final card = find
+        .descendant(of: find.byType(AccountPicker), matching: find.text(name))
+        .first;
+    await tester.ensureVisible(card);
+    await tester.tap(card);
     await tester.pumpAndSettle();
   }
 
@@ -65,8 +82,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Overview'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Add transaction'));
-      await tester.pumpAndSettle();
+      await openManualTransaction(tester);
       expect(
         tester.getBottomLeft(find.text('Save transaction')).dy,
         lessThan(1552),
@@ -80,10 +96,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Groceries').last);
       await tester.pumpAndSettle();
-      await tester.tap(find.byType(DropdownButtonFormField<AccountKind>));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Cash').last);
-      await tester.pumpAndSettle();
+      await selectAccount(tester, 'Cash');
       await tester.tap(find.text('Save transaction'));
       await tester.runAsync(() async {
         await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -516,8 +529,7 @@ void main() {
       );
       await tester.pumpWidget(MyApp(store: store));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Add transaction'));
-      await tester.pumpAndSettle();
+      await openManualTransaction(tester);
       await tester.tap(find.byType(DropdownButtonFormField<EntryType>));
       await tester.pumpAndSettle();
       await tester.tap(find.text('income').last);
@@ -541,10 +553,8 @@ void main() {
         findsOneWidget,
       );
       expect(store.entries, isEmpty);
-      await tester.tap(find.byType(DropdownButtonFormField<int>));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Main bank').last);
-      await tester.pumpAndSettle();
+
+      await selectAccount(tester, 'Main bank');
       await tester.tap(find.text('Save transaction'));
       await tester.runAsync(() async {
         await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -563,14 +573,7 @@ void main() {
       expect(find.text('Account wealth: €175.00'), findsOneWidget);
       expect(find.text('Available to spend: €100.00'), findsOneWidget);
       expect(find.text('Excludes blocked accounts: €75.00'), findsOneWidget);
-      await tester.tap(find.byTooltip('Add transaction'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byType(DropdownButtonFormField<AccountKind>));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Bank').last);
-      await tester.pumpAndSettle();
-      await tester.tap(find.byType(DropdownButtonFormField<int>));
-      await tester.pumpAndSettle();
+      await openManualTransaction(tester);
       expect(find.text('Main bank'), findsNothing);
       expect(tester.takeException(), isNull);
     },
@@ -702,8 +705,7 @@ void main() {
       expect(store.entries.single.amount, 1000);
       await tester.pageBack();
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Add transaction'));
-      await tester.pumpAndSettle();
+      await openManualTransaction(tester);
       await tester.enterText(
         find.widgetWithText(TextFormField, 'Description / merchant'),
         'Too much',
@@ -716,14 +718,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Other').last);
       await tester.pumpAndSettle();
-      await tester.tap(find.byType(DropdownButtonFormField<AccountKind>));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Bank').last);
-      await tester.pumpAndSettle();
-      await tester.tap(find.byType(DropdownButtonFormField<int>));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Debit bank').last);
-      await tester.pumpAndSettle();
+      await selectAccount(tester, 'Debit bank');
       await tester.tap(find.text('Save transaction'));
       await tester.runAsync(() async {
         await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -892,8 +887,7 @@ void main() {
       await tester.pumpWidget(MyApp(store: store));
       await tester.pumpAndSettle();
       expect(find.textContaining('No expenses or refunds'), findsOneWidget);
-      await tester.tap(find.byTooltip('Add transaction'));
-      await tester.pumpAndSettle();
+      await openManualTransaction(tester);
       expect(find.text('Currency: €'), findsOneWidget);
       expect(find.byType(DropdownButtonFormField<Currency>), findsNothing);
       expect(find.textContaining('IQD'), findsNothing);
@@ -913,10 +907,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Groceries').last);
       await tester.pumpAndSettle();
-      await tester.tap(find.byType(DropdownButtonFormField<AccountKind>));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Cash').last);
-      await tester.pumpAndSettle();
+      await selectAccount(tester, 'Cash');
       await tester.ensureVisible(find.text('Save transaction'));
       await tester.tap(find.text('Save transaction'));
       await tester.runAsync(() async {
@@ -943,14 +934,7 @@ void main() {
         find.widgetWithText(TextFormField, 'Amount'),
         '15',
       );
-      await tester.tap(find.byType(DropdownButtonFormField<AccountKind>));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Bank').last);
-      await tester.pumpAndSettle();
-      await tester.tap(find.byType(DropdownButtonFormField<int>));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Main bank').last);
-      await tester.pumpAndSettle();
+      await selectAccount(tester, 'Main bank');
       await tester.ensureVisible(find.text('Save transaction'));
       await tester.tap(find.text('Save transaction'));
       await tester.runAsync(() async {

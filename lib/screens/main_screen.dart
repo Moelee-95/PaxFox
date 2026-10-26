@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 
 import '../core/data/ledger_store.dart';
 import '../core/domain/ledger.dart';
+import '../core/presentation/ledger_refresh.dart';
 import '../core/presentation/main_drawer.dart';
 import '../core/presentation/transaction_tile.dart';
+import '../core/presentation/transaction_menu.dart';
 import '../features/receipts/invoice.dart';
 import '../features/receipts/invoice_review_screen.dart';
 import '../features/receipts/invoice_scan_screen.dart';
@@ -31,6 +33,7 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   final PageController _pageController = PageController();
+  final _addButtonKey = GlobalKey();
   bool _checkingRecurring = false;
   String? _recurringError;
   final Set<int> _selectedIds = {};
@@ -97,6 +100,28 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void _toggleSelection(LedgerEntry entry) => setState(() {
     if (!_selectedIds.add(entry.id!)) _selectedIds.remove(entry.id);
   });
+
+  Future<void> _createTransaction() async {
+    final button =
+        _addButtonKey.currentContext?.findRenderObject() as RenderBox?;
+    if (button == null) return;
+    final action = await showTransactionMenu(
+      context,
+      anchor: button.localToGlobal(Offset.zero) & button.size,
+    );
+    if (!mounted || action == null) return;
+    if (action == TransactionCreation.manual) {
+      await _editTransaction();
+      return;
+    }
+    final saved = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute<bool>(
+        builder: (_) => InvoiceScanScreen(store: widget.store),
+      ),
+    );
+    if (saved == true && mounted) _goHome();
+  }
 
   Future<void> _editTransaction([LedgerEntry? entry]) async {
     try {
@@ -297,26 +322,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                     child: LinearProgressIndicator(),
                   )
                 : null,
-            actions: _selectedIds.isNotEmpty
-                ? _selectionActions()
-                : [
-                    IconButton(
-                      tooltip: 'Scan invoice',
-                      icon: const Icon(Icons.document_scanner_outlined),
-                      onPressed: () async {
-                        final saved = await Navigator.push<bool>(
-                          context,
-                          MaterialPageRoute<bool>(
-                            builder: (_) =>
-                                InvoiceScanScreen(store: widget.store),
-                          ),
-                        );
-                        if (saved == true && mounted) {
-                          _goHome();
-                        }
-                      },
-                    ),
-                  ],
+            actions: _selectedIds.isNotEmpty ? _selectionActions() : null,
             title: Text(
               _selectedIds.isNotEmpty
                   ? '${_selectedIds.length} selected'
@@ -343,79 +349,84 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                   ),
           ),
           drawer: MainDrawer(onSelected: _openMenu, showReports: _showReports),
-          body: Align(
-            alignment: Alignment.topCenter,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 900),
-              child: IndexedStack(
-                index: _showReports ? 1 : 0,
-                children: [
-                  TickerMode(
-                    enabled: !_showReports,
-                    child: PageView.builder(
-                      key: const ValueKey('main-pages'),
-                      controller: _pageController,
-                      onPageChanged: (index) => setState(() {
-                        _navigationIndex = index;
-                        _selectedIds.clear();
-                      }),
-                      itemCount: 4,
-                      itemBuilder: (context, index) => switch (index) {
-                        0 => HomeScreen(
-                          month: _month,
-                          summary: summary,
-                          tab: _homeTab,
-                          onTabChanged: (tab) => setState(() {
-                            _homeTab = tab;
-                            _selectedIds.clear();
-                          }),
-                          onMonthChanged: _changeMonth,
-                          tileBuilder: (entry) =>
-                              _transactionTile(entry, compact: true),
-                        ),
-                        1 => OverviewScreen(
-                          store: widget.store,
-                          month: _month,
-                          summary: summary,
-                          recurringError: _recurringError,
-                          onOpenRecurring: _openRecurring,
-                        ),
-                        2 => FreedomScreen(store: widget.store),
-                        _ => TransactionsScreen(
-                          entries: widget.store.searchEntries(
-                            query: _searchQuery,
-                            type: _entryType,
+          body: LedgerRefresh(
+            store: widget.store,
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 900),
+                child: IndexedStack(
+                  index: _showReports ? 1 : 0,
+                  children: [
+                    TickerMode(
+                      enabled: !_showReports,
+                      child: PageView.builder(
+                        key: const ValueKey('main-pages'),
+                        controller: _pageController,
+                        onPageChanged: (index) => setState(() {
+                          _navigationIndex = index;
+                          _selectedIds.clear();
+                        }),
+                        itemCount: 4,
+                        itemBuilder: (context, index) => switch (index) {
+                          0 => HomeScreen(
+                            month: _month,
+                            summary: summary,
+                            tab: _homeTab,
+                            onTabChanged: (tab) => setState(() {
+                              _homeTab = tab;
+                              _selectedIds.clear();
+                            }),
+                            onMonthChanged: _changeMonth,
+                            tileBuilder: (entry) =>
+                                _transactionTile(entry, compact: true),
                           ),
-                          search: _searchQuery,
-                          type: _entryType,
-                          onSearchChanged: (value) => setState(() {
-                            _searchQuery = value;
-                            _selectedIds.clear();
-                          }),
-                          onTypeChanged: (value) => setState(() {
-                            _entryType = value;
-                            _selectedIds.clear();
-                          }),
-                          tileBuilder: _transactionTile,
-                        ),
-                      },
+                          1 => OverviewScreen(
+                            store: widget.store,
+                            month: _month,
+                            summary: summary,
+                            recurringError: _recurringError,
+                            onOpenRecurring: _openRecurring,
+                          ),
+                          2 => FreedomScreen(store: widget.store),
+                          _ => TransactionsScreen(
+                            entries: widget.store.searchEntries(
+                              query: _searchQuery,
+                              type: _entryType,
+                            ),
+                            search: _searchQuery,
+                            type: _entryType,
+                            onSearchChanged: (value) => setState(() {
+                              _searchQuery = value;
+                              _selectedIds.clear();
+                            }),
+                            onTypeChanged: (value) => setState(() {
+                              _entryType = value;
+                              _selectedIds.clear();
+                            }),
+                            tileBuilder: _transactionTile,
+                          ),
+                        },
+                      ),
                     ),
-                  ),
-                  if (_showReports)
-                    ReportsScreen(
-                      month: _month,
-                      summary: summary,
-                      onMonthChanged: _changeMonth,
-                      hasLegacyCurrencyData: widget.store.hasLegacyCurrencyData,
-                    ),
-                ],
+                    if (_showReports)
+                      ReportsScreen(
+                        month: _month,
+                        summary: summary,
+                        onMonthChanged: _changeMonth,
+                        hasLegacyCurrencyData:
+                            widget.store.hasLegacyCurrencyData,
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
           floatingActionButton: _selectedIds.isNotEmpty
               ? null
               : FloatingActionButton(
-                  onPressed: () => _editTransaction(),
+                  key: _addButtonKey,
+                  onPressed: _createTransaction,
                   tooltip: 'Add transaction',
                   child: const Icon(Icons.add),
                 ),

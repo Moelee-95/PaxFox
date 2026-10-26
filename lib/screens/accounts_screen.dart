@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/data/ledger_store.dart';
 import '../core/domain/ledger.dart';
+import '../core/presentation/ledger_refresh.dart';
 
 class AccountsScreen extends StatelessWidget {
   const AccountsScreen({super.key, required this.store});
@@ -20,44 +21,48 @@ class AccountsScreen extends StatelessWidget {
       icon: const Icon(Icons.add),
       label: const Text('Add account'),
     ),
-    body: ListenableBuilder(
-      listenable: store,
-      builder: (_, _) => ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-        children: [
-          const Text(
-            'Blocked accounts count toward account wealth but cannot fund payments or outgoing transfers. Income can still be received into them. Tap an account to edit.',
-          ),
-          if (store.accounts.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(24),
-              child: Text('No accounts yet.'),
+    body: LedgerRefresh(
+      store: store,
+      child: ListenableBuilder(
+        listenable: store,
+        builder: (_, _) => ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+          children: [
+            const Text(
+              'Blocked accounts count toward account wealth but cannot fund payments or outgoing transfers. Income can still be received into them. Tap an account to edit.',
             ),
-          for (final a in store.accounts)
-            Card(
-              child: ListTile(
-                onTap: () => edit(context, a),
-                title: Text(a.name),
-                subtitle: Text(
-                  '${a.kind == AccountKind.cash ? 'Cash' : 'Bank'} - ${!a.available
-                      ? 'Blocked - included in wealth'
-                      : a.canOverdraw
-                      ? 'Overdraft allowed'
-                      : 'Cannot go below zero'}',
-                ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      '€${a.currency.format(store.currentBalances.byAccount[a.id] ?? a.opening)}',
-                    ),
-                    const SizedBox(width: 8),
-                    const Icon(Icons.edit_outlined),
-                  ],
+            if (store.accounts.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: Text('No accounts yet.'),
+              ),
+            for (final a in store.accounts)
+              Card(
+                child: ListTile(
+                  onTap: () => edit(context, a),
+                  title: Text(a.name),
+                  subtitle: Text(
+                    '${a.kind == AccountKind.cash ? 'Cash' : 'Bank'} - ${!a.available
+                        ? 'Blocked - included in wealth'
+                        : a.canOverdraw
+                        ? 'Overdraft allowed'
+                        : 'Cannot go below zero'}',
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '€${a.currency.format(store.currentBalances.byAccount[a.id] ?? a.opening)}',
+                      ),
+                      const SizedBox(width: 8),
+                      const Icon(Icons.edit_outlined),
+                    ],
+                  ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     ),
   );

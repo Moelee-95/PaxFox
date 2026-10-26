@@ -2,9 +2,8 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:flutter/foundation.dart';
 
-import 'gemini_invoice_extractor.dart';
+import 'invoice_image_preparation.dart';
 
 class InvoiceImages {
   Future<File> resolve(String relative) async {
@@ -24,10 +23,7 @@ class InvoiceImages {
         final relative = p.join('receipts', '$prefix-$i.jpg');
         final target = await resolve(relative);
         await target.parent.create(recursive: true);
-        final bytes = await compute(
-          prepareInvoiceImage,
-          await files[i].readAsBytes(),
-        );
+        final bytes = await InvoiceImagePreparation.bytesFor(files[i]);
         await target.writeAsBytes(bytes, flush: true);
         result.add(relative);
       }

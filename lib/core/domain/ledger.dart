@@ -51,12 +51,14 @@ class LedgerEntry {
     this.accountId,
     this.destinationId,
     this.notes = '',
+    this.createdAt,
   });
   final int? id;
   final EntryType type;
   final int amount;
   final Currency currency;
   final DateTime date;
+  final DateTime? createdAt;
   final String description, category, notes;
   final int? accountId, destinationId;
 
@@ -87,6 +89,7 @@ class LedgerEntry {
     accountId: row['account_id'] as int?,
     destinationId: row['destination_id'] as int?,
     notes: row['notes'] as String,
+    createdAt: DateTime.tryParse(row['created_at'] as String? ?? ''),
   );
 }
 

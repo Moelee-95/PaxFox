@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 
 import '../../core/data/ledger_store.dart';
 import '../../core/domain/ledger.dart';
+import '../../core/presentation/account_picker.dart';
 import '../../core/presentation/bottom_action_bar.dart';
 import '../../core/presentation/confirmation_dialog.dart';
+import '../../core/presentation/info_button.dart';
 import 'invoice.dart';
 import 'invoice_images.dart';
 
@@ -29,7 +31,7 @@ class InvoiceReviewScreen extends StatefulWidget {
 
 class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
   final form = GlobalKey<FormState>();
-  late final TextEditingController merchant, total, adjustment, note;
+  late final TextEditingController merchant;
   late List<InvoiceItem> items;
   DateTime? date;
   String? category;
@@ -44,32 +46,30 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
     merchant = TextEditingController(
       text: widget.entry?.description ?? draft.merchant,
     );
-    total = TextEditingController(
-      text: draft.total == null ? '' : Currency.eur.format(draft.total!),
-    );
-    adjustment = TextEditingController(
-      text: Currency.eur.format(draft.adjustment ?? 0),
-    );
-    note = TextEditingController(text: draft.adjustmentNote);
     items = expandInvoiceItems(draft.items);
+    if ((draft.adjustment ?? 0) != 0) {
+      items.add(
+        InvoiceItem(
+          description: draft.adjustmentNote.trim().isEmpty
+              ? 'Invoice adjustment'
+              : draft.adjustmentNote,
+          quantity: '1',
+          total: draft.adjustment,
+          category: draft.category,
+          edited: true,
+        ),
+      );
+    }
     date = widget.entry?.date ?? draft.date;
     category = widget.entry?.category ?? draft.category;
     accountId = widget.entry?.accountId;
-    euroConfirmed = draft.currency == 'EUR';
+    euroConfirmed = draft.currency?.trim().toUpperCase() == 'EUR';
   }
 
   @override
   void dispose() {
-    for (final c in [merchant, total, adjustment, note]) {
-      c.dispose();
-    }
+    merchant.dispose();
     super.dispose();
-  }
-
-  int signed(String s) {
-    final text = s.trim();
-    return Currency.eur.parse(text.replaceFirst(RegExp(r'^-'), '')) *
-        (text.startsWith('-') ? -1 : 1);
   }
 
   Future<void> editItem([int? index]) async {
@@ -120,10 +120,9 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
         merchant: merchant.text.trim(),
         date: date,
         currency: 'EUR',
-        total: Currency.eur.parse(total.text),
+        total: items.fold<int>(0, (sum, item) => sum + (item.total ?? 0)),
         category: category,
-        adjustment: signed(adjustment.text),
-        adjustmentNote: note.text.trim(),
+        adjustment: 0,
         items: items,
         raw: widget.draft.raw,
       );
@@ -166,18 +165,6 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
   @override
   Widget build(BuildContext context) {
     final sum = items.fold<int>(0, (sum, item) => sum + (item.total ?? 0));
-    int? adjusted;
-    try {
-      adjusted = sum + signed(adjustment.text);
-    } on FormatException {
-      adjusted = null;
-    }
-    int? charged;
-    try {
-      charged = Currency.eur.parse(total.text);
-    } on FormatException {
-      charged = null;
-    }
     final names = widget.store
         .categoriesFor(EntryType.expense)
         .map((c) => c.name)
@@ -195,6 +182,16 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
         appBar: AppBar(
           title: const Text('Review invoice'),
           actions: [
+            InfoButton(
+              title: 'Invoice review information',
+              message: 'Review the extracted items. Each item saves as a separate transaction with its own description, price and category, using the date and payment account below. Discounts save as refunds. All items are saved together. The saved total is the sum of the reviewed items; check them against the original invoice.',
+              details: widget.draft.raw.isEmpty
+                  ? null
+                  : ExpansionTile(
+                      title: const Text('Original AI response'),
+                      children: [SelectableText(widget.draft.raw)],
+                    ),
+            ),
             if (widget.entry != null)
               IconButton(
                 tooltip: 'Delete invoice',
@@ -239,9 +236,6 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
               24 + MediaQuery.paddingOf(context).bottom,
             ),
             children: [
-              const Text(
-                'Review the extracted items. Each item saves as a separate transaction with its own description, price and category, using the date and payment account below. Discounts save as refunds. All items are saved together.',
-              ),
               for (final file in widget.images)
                 SizedBox(
                   height: 180,
@@ -264,34 +258,35 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
                         )
                       : const SizedBox(height: 30),
                 ),
-              if (widget.draft.currency != 'EUR')
+              if (widget.draft.currency?.trim().toUpperCase() != 'EUR')
                 Text(
                   'Detected currency: ${widget.draft.currency ?? 'unknown'}. Only EUR invoices can be saved. Do not relabel a foreign-currency amount.',
                 ),
-              FormField<bool>(
-                initialValue: euroConfirmed,
-                autovalidateMode: AutovalidateMode.onUserInteraction,
-                validator: (_) => euroConfirmed
-                    ? null
-                    : 'Confirm that the original invoice is in EUR.',
-                builder: (field) => InputDecorator(
-                  decoration: InputDecoration(
-                    border: InputBorder.none,
-                    errorText: field.errorText,
-                  ),
-                  child: CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('I confirm this invoice is in EUR'),
-                    value: euroConfirmed,
-                    onChanged: busy
-                        ? null
-                        : (v) {
-                            setState(() => euroConfirmed = v!);
-                            field.didChange(v);
-                          },
+              if (widget.draft.currency?.trim().toUpperCase() != 'EUR')
+                FormField<bool>(
+                  initialValue: euroConfirmed,
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
+                  validator: (_) => euroConfirmed
+                      ? null
+                      : 'Confirm that the original invoice is in EUR.',
+                  builder: (field) => InputDecorator(
+                    decoration: InputDecoration(
+                      border: InputBorder.none,
+                      errorText: field.errorText,
+                    ),
+                    child: CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('I confirm this invoice is in EUR'),
+                      value: euroConfirmed,
+                      onChanged: busy
+                          ? null
+                          : (v) {
+                              setState(() => euroConfirmed = v!);
+                              field.didChange(v);
+                            },
+                    ),
                   ),
                 ),
-              ),
               TextFormField(
                 controller: merchant,
                 enabled: !busy,
@@ -351,23 +346,15 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
                 onChanged: busy ? null : (v) => setState(() => category = v),
                 validator: (s) => s == null ? 'Select a category.' : null,
               ),
-              DropdownButtonFormField<int>(
-                initialValue:
-                    widget.store.accounts.any(
-                      (a) => a.id == accountId && a.available,
-                    )
-                    ? accountId
-                    : null,
-                decoration: const InputDecoration(
-                  labelText: 'Paid from (cash or bank)',
-                ),
-                items: widget.store.accounts
-                    .where((a) => a.available)
-                    .map(
-                      (a) => DropdownMenuItem(value: a.id, child: Text(a.name)),
-                    )
+              AccountPicker(
+                balances: widget.store.currentBalances.byAccount,
+                label: 'Paid from (cash or bank)',
+                accounts: widget.store.accounts
+                    .where((account) => account.available)
                     .toList(),
-                onChanged: busy ? null : (v) => setState(() => accountId = v),
+                selectedId: accountId,
+                enabled: !busy,
+                onChanged: (id) => setState(() => accountId = id),
                 validator: (id) => id == null
                     ? 'Choose the cash or bank account used to pay this invoice.'
                     : null,
@@ -439,70 +426,7 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
                 icon: const Icon(Icons.add),
                 label: const Text('Add item'),
               ),
-              Text('Item subtotal: €${Currency.eur.format(sum)}'),
-              TextFormField(
-                controller: adjustment,
-                enabled: !busy,
-                decoration: const InputDecoration(
-                  labelText: 'Adjustment (€, signed)',
-                ),
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                  signed: true,
-                ),
-                onChanged: (_) => setState(() {}),
-                validator: (s) {
-                  try {
-                    signed(s ?? '');
-                  } on FormatException catch (e) {
-                    return e.message;
-                  }
-                  return null;
-                },
-              ),
-              TextFormField(
-                controller: note,
-                enabled: !busy,
-                decoration: const InputDecoration(
-                  labelText: 'Adjustment explanation / notes',
-                ),
-              ),
-              TextFormField(
-                controller: total,
-                enabled: !busy,
-                decoration: const InputDecoration(
-                  labelText: 'Charged total (€)',
-                ),
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                onChanged: (_) => setState(() {}),
-                validator: (s) {
-                  try {
-                    if (Currency.eur.parse(s ?? '') <= 0) {
-                      return 'Enter a positive charged amount.';
-                    }
-                  } on FormatException catch (e) {
-                    return e.message;
-                  }
-                  return null;
-                },
-              ),
-              Text(
-                adjusted == charged && charged != null
-                    ? 'Prices add up. Verify the charged total against the original invoice.'
-                    : 'Total mismatch: item subtotal plus adjustments must equal the charged total.',
-                style: TextStyle(
-                  color: adjusted == charged && charged != null
-                      ? null
-                      : Theme.of(context).colorScheme.error,
-                ),
-              ),
-              if (widget.draft.raw.isNotEmpty)
-                ExpansionTile(
-                  title: const Text('Original AI response'),
-                  children: [SelectableText(widget.draft.raw)],
-                ),
+              Text('Items total: ${Currency.eur.display(sum)}'),
               if (error != null)
                 Text(
                   error!,

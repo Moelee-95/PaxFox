@@ -80,6 +80,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
           ),
         Expanded(
           child: ListView.builder(
+            physics: const AlwaysScrollableScrollPhysics(),
             itemCount: widget.entries.length,
             itemBuilder: (_, index) =>
                 widget.tileBuilder(widget.entries[index]),

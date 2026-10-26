@@ -27,6 +27,8 @@ class RecurringRule {
     this.archived = false,
     this.endDate,
     this.type = EntryType.expense,
+    this.isAsset = false,
+    this.isLiability = false,
   });
   final int? id;
   final String description, category;
@@ -34,6 +36,7 @@ class RecurringRule {
   final DateTime nextDate;
   final DateTime? endDate;
   final bool active, archived;
+  final bool isAsset, isLiability;
   final EntryType type;
   Map<String, Object?> toMap() => {
     'description': description,
@@ -47,6 +50,8 @@ class RecurringRule {
     'end_date': endDate == null ? null : dayKey(endDate!),
     'active': active ? 1 : 0,
     'archived': archived ? 1 : 0,
+    'is_asset': isAsset ? 1 : 0,
+    'is_liability': isLiability ? 1 : 0,
   };
   factory RecurringRule.fromMap(Map<String, Object?> row) => RecurringRule(
     id: row['id'] as int,
@@ -63,6 +68,8 @@ class RecurringRule {
         : DateTime.parse(row['end_date'] as String),
     active: row['active'] == 1,
     archived: row['archived'] == 1,
+    isAsset: row['is_asset'] == 1,
+    isLiability: row['is_liability'] == 1,
   );
 }
 

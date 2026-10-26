@@ -1,28 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'package:image/image.dart' as img;
 
 import 'invoice.dart';
 import 'gemini_key_provider.dart';
-
-Uint8List prepareInvoiceImage(Uint8List bytes) {
-  final decoded = img.decodeImage(bytes);
-  if (decoded == null) {
-    throw const FormatException('Unsupported image.');
-  }
-  final oriented = img.bakeOrientation(decoded);
-  final resized = oriented.width > 2400 || oriented.height > 3200
-      ? img.copyResize(
-          oriented,
-          width: oriented.width >= oriented.height ? 2400 : null,
-          height: oriented.height > oriented.width ? 3200 : null,
-        )
-      : oriented;
-  return Uint8List.fromList(img.encodeJpg(resized, quality: 85));
-}
+import 'invoice_image_preparation.dart';
 
 abstract interface class InvoiceExtractor {
   Future<InvoiceDraft> extract(List<File> images, Set<String> categories);
@@ -78,13 +61,7 @@ Money must be decimal STRINGS with dot, no grouping, max 2 decimals. Quantities 
     for (final image in images) {
       onProgress?.call('Preparing image ${parts.length} of ${images.length}');
       _checkCancelled();
-      if (await image.length() > 25 * 1024 * 1024) {
-        throw ArgumentError('An image is too large (25 MB limit).');
-      }
-      final bytes = await compute(
-        prepareInvoiceImage,
-        await image.readAsBytes(),
-      );
+      final bytes = await InvoiceImagePreparation.bytesFor(image);
       _checkCancelled();
       payloadSize += bytes.length;
       if (payloadSize > 12 * 1024 * 1024) {

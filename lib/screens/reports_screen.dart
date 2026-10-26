@@ -58,6 +58,7 @@ class ReportsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListView(
+    physics: const AlwaysScrollableScrollPhysics(),
     padding: const EdgeInsets.all(16),
     children: [
       MonthSelector(month: month, onChanged: onMonthChanged),

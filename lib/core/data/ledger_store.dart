@@ -787,6 +787,12 @@ class LedgerStore extends ChangeNotifier {
     if (rule.type != EntryType.expense && rule.type != EntryType.income) {
       throw ArgumentError('Recurring entries must be expenses or income.');
     }
+    if ((rule.isAsset && rule.type != EntryType.income) ||
+        (rule.isLiability && rule.type != EntryType.expense)) {
+      throw ArgumentError(
+        'Only income can be marked as an asset and expenses as a liability.',
+      );
+    }
     final current = dateOnly(today ?? DateTime.now());
     if (rule.description.trim().isEmpty ||
         rule.amount <= 0 ||

@@ -59,6 +59,7 @@ class _HomeScreenState extends State<HomeScreen>
     final totals = widget.summary.eurTotals;
     Widget list(String view, List<LedgerEntry> entries, String empty) =>
         ListView.builder(
+          physics: const AlwaysScrollableScrollPhysics(),
           key: PageStorageKey(
             'home-$view-${widget.month.year}-${widget.month.month}',
           ),

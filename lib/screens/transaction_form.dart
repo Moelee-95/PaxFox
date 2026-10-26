@@ -6,11 +6,12 @@ import 'package:flutter/material.dart';
 import '../core/data/ledger_store.dart';
 import '../core/domain/category.dart';
 import '../core/domain/ledger.dart';
+import '../core/presentation/account_picker.dart';
 import '../core/presentation/bottom_action_bar.dart';
 import '../core/presentation/category_icons.dart';
 import '../core/presentation/confirmation_dialog.dart';
+import '../core/presentation/transaction_tile.dart';
 import '../features/receipts/invoice_images.dart';
-import '../features/receipts/invoice_scan_screen.dart';
 
 class TransactionForm extends StatefulWidget {
   const TransactionForm({super.key, required this.store, this.entry});
@@ -28,7 +29,6 @@ class _TransactionFormState extends State<TransactionForm> {
   late Currency currency;
   late DateTime date;
   int? accountId, destinationId;
-  AccountKind? paymentMethod;
   bool saving = false;
   String? error;
   Future<Map<String, Object?>?>? scannedInvoice;
@@ -45,11 +45,6 @@ class _TransactionFormState extends State<TransactionForm> {
     type = e?.type ?? EntryType.expense;
     date = e?.date ?? dateOnly(DateTime.now());
     accountId = e?.accountId;
-    for (final account in widget.store.accounts) {
-      if (account.id == accountId) {
-        paymentMethod = account.kind;
-      }
-    }
     destinationId = e?.destinationId;
     amount = TextEditingController(
       text: e == null ? '' : currency.format(e.amount),
@@ -142,56 +137,35 @@ class _TransactionFormState extends State<TransactionForm> {
     }
   }
 
-  Widget accountField(bool destination) => DropdownButtonFormField<int>(
-    key: ValueKey('${currency.name}-$destination-$paymentMethod-$type'),
-    initialValue:
-        widget.store.accounts.any(
-          (a) =>
-              a.id == (destination ? destinationId : accountId) &&
+  Widget accountField(bool destination) => AccountPicker(
+    balances: widget.store.currentBalances.byAccount,
+    label: destination
+        ? 'Destination account'
+        : type == EntryType.income
+        ? 'Receive income into'
+        : 'Payment account',
+    accounts: widget.store.accounts
+        .where(
+          (account) =>
+              account.currency == currency &&
               (destination ||
                   (type != EntryType.expense && type != EntryType.transfer) ||
-                  a.available) &&
-              (destination ||
-                  type != EntryType.expense ||
-                  a.kind == paymentMethod),
+                  account.available),
         )
-        ? (destination ? destinationId : accountId)
-        : null,
-    decoration: InputDecoration(
-      labelText: destination
-          ? 'Destination account'
-          : type == EntryType.expense
-          ? (paymentMethod == AccountKind.cash
-                ? 'Cash account'
-                : 'Bank account')
-          : type == EntryType.income
-          ? 'Receive income into'
-          : 'Account',
-    ),
-    items: [
-      const DropdownMenuItem<int>(value: null, child: Text('No account')),
-      ...widget.store.accounts
-          .where(
-            (a) =>
-                a.currency == currency &&
-                (destination ||
-                    (type != EntryType.expense && type != EntryType.transfer) ||
-                    a.available) &&
-                (destination ||
-                    type != EntryType.expense ||
-                    a.kind == paymentMethod),
-          )
-          .map((a) => DropdownMenuItem(value: a.id, child: Text(a.name))),
-    ],
-    onChanged: saving
-        ? null
-        : (id) => setState(() {
-            if (destination) {
-              destinationId = id;
-            } else {
-              accountId = id;
-            }
-          }),
+        .toList(),
+    selectedId: destination ? destinationId : accountId,
+    enabled: !saving,
+    allowUnassigned:
+        !destination &&
+        type != EntryType.transfer &&
+        (originallyUnassigned || type == EntryType.refund),
+    onChanged: (id) => setState(() {
+      if (destination) {
+        destinationId = id;
+      } else {
+        accountId = id;
+      }
+    }),
     validator: (id) =>
         ((type == EntryType.expense || type == EntryType.income) &&
             id == null &&
@@ -217,24 +191,6 @@ class _TransactionFormState extends State<TransactionForm> {
         widget.entry == null ? 'Add transaction' : 'Edit transaction',
       ),
       actions: [
-        if (widget.entry == null)
-          IconButton(
-            tooltip: 'Scan invoice',
-            icon: const Icon(Icons.document_scanner_outlined),
-            onPressed: saving
-                ? null
-                : () async {
-                    final saved = await Navigator.push<bool>(
-                      context,
-                      MaterialPageRoute<bool>(
-                        builder: (_) => InvoiceScanScreen(store: widget.store),
-                      ),
-                    );
-                    if (saved == true && context.mounted) {
-                      Navigator.pop(context, true);
-                    }
-                  },
-          ),
         if (widget.entry != null)
           IconButton(
             tooltip: 'Delete transaction',
@@ -293,6 +249,10 @@ class _TransactionFormState extends State<TransactionForm> {
                       ],
                     );
                   },
+                ),
+              if (widget.entry?.createdAt != null)
+                Text(
+                  'Added ${creationTimestamp(context, widget.entry!.createdAt!)}',
                 ),
               DropdownButtonFormField<EntryType>(
                 initialValue: type,
@@ -399,57 +359,7 @@ class _TransactionFormState extends State<TransactionForm> {
                   validator: (value) =>
                       value == null ? 'Select a category.' : null,
                 ),
-              if (type == EntryType.expense) ...[
-                if (originallyUnassigned)
-                  const Text(
-                    'This historical expense has no assigned account. It counts in spending without changing account balances.',
-                  ),
-                DropdownButtonFormField<AccountKind>(
-                  initialValue: paymentMethod,
-                  hint: originallyUnassigned
-                      ? const Text('Unknown (unassigned)')
-                      : null,
-                  decoration: const InputDecoration(
-                    labelText: 'Payment method',
-                  ),
-                  items: [
-                    if (originallyUnassigned)
-                      const DropdownMenuItem<AccountKind>(
-                        value: null,
-                        child: Text('Unknown (unassigned)'),
-                      ),
-                    const DropdownMenuItem(
-                      value: AccountKind.cash,
-                      child: Text('Cash'),
-                    ),
-                    const DropdownMenuItem(
-                      value: AccountKind.bank,
-                      child: Text('Bank'),
-                    ),
-                  ],
-                  onChanged: saving
-                      ? null
-                      : (method) => setState(() {
-                          paymentMethod = method;
-                          final choices = widget.store.accounts
-                              .where((a) => a.kind == method && a.available)
-                              .toList();
-                          accountId =
-                              method == AccountKind.cash && choices.length == 1
-                              ? choices.single.id
-                              : null;
-                        }),
-                  validator: (value) => value == null && !originallyUnassigned
-                      ? 'Choose cash or bank.'
-                      : null,
-                ),
-                if (paymentMethod != null) accountField(false),
-                if (accountId != null)
-                  Text(
-                    'Available balance: €${Currency.eur.format(widget.store.currentBalances.byAccount[accountId] ?? 0)}. ${widget.store.accounts.singleWhere((a) => a.id == accountId).canOverdraw ? 'Overdraft allowed.' : 'Insufficient funds will be rejected.'}',
-                  ),
-              ] else
-                accountField(false),
+              accountField(false),
               if (type == EntryType.transfer) accountField(true),
               if (widget.store.accounts.isEmpty)
                 const Padding(

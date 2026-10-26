@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/data/ledger_store.dart';
 import '../core/domain/category.dart';
 import '../core/presentation/category_icons.dart';
+import '../core/presentation/ledger_refresh.dart';
 
 class CategoriesScreen extends StatelessWidget {
   const CategoriesScreen({super.key, required this.store});
@@ -21,57 +22,61 @@ class CategoriesScreen extends StatelessWidget {
           ],
         ),
       ),
-      body: ListenableBuilder(
-        listenable: store,
-        builder: (context, _) => TabBarView(
-          children: [
-            for (final kind in CategoryKind.values)
-              Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      children: [
-                        const Text(
-                          'Choose from these categories when adding transactions. Renaming a category also updates its existing transactions. Refunds use expense categories.',
-                        ),
-                        const SizedBox(height: 12),
-                        FilledButton.icon(
-                          onPressed: () => _edit(context, kind),
-                          icon: const Icon(Icons.add),
-                          label: Text(
-                            kind == CategoryKind.expense
-                                ? 'Add expense category'
-                                : 'Add income category',
+      body: LedgerRefresh(
+        store: store,
+        child: ListenableBuilder(
+          listenable: store,
+          builder: (context, _) => TabBarView(
+            children: [
+              for (final kind in CategoryKind.values)
+                Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        children: [
+                          const Text(
+                            'Choose from these categories when adding transactions. Renaming a category also updates its existing transactions. Refunds use expense categories.',
                           ),
-                        ),
-                      ],
+                          const SizedBox(height: 12),
+                          FilledButton.icon(
+                            onPressed: () => _edit(context, kind),
+                            icon: const Icon(Icons.add),
+                            label: Text(
+                              kind == CategoryKind.expense
+                                  ? 'Add expense category'
+                                  : 'Add income category',
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: store.categories
-                          .where((c) => c.kind == kind)
-                          .length,
-                      itemBuilder: (context, index) {
-                        final category = store.categories
+                    Expanded(
+                      child: ListView.builder(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        itemCount: store.categories
                             .where((c) => c.kind == kind)
-                            .elementAt(index);
-                        return ListTile(
-                          leading: Icon(categoryIconData(category.icon)),
-                          title: Text(category.name),
-                          trailing: IconButton(
-                            tooltip: 'Edit ${category.name}',
-                            icon: const Icon(Icons.edit_outlined),
-                            onPressed: () => _edit(context, kind, category),
-                          ),
-                        );
-                      },
+                            .length,
+                        itemBuilder: (context, index) {
+                          final category = store.categories
+                              .where((c) => c.kind == kind)
+                              .elementAt(index);
+                          return ListTile(
+                            leading: Icon(categoryIconData(category.icon)),
+                            title: Text(category.name),
+                            trailing: IconButton(
+                              tooltip: 'Edit ${category.name}',
+                              icon: const Icon(Icons.edit_outlined),
+                              onPressed: () => _edit(context, kind, category),
+                            ),
+                          );
+                        },
+                      ),
                     ),
-                  ),
-                ],
-              ),
-          ],
+                  ],
+                ),
+            ],
+          ),
         ),
       ),
     ),

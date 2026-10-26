@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../core/data/ledger_store.dart';
-import '../core/domain/ledger.dart';
 import '../core/domain/freedom.dart';
+import '../core/domain/ledger.dart';
 
 class FreedomScreen extends StatefulWidget {
   const FreedomScreen({super.key, required this.store});
@@ -30,28 +30,31 @@ class _FreedomScreenState extends State<FreedomScreen> {
   Widget build(BuildContext context) {
     final plan = widget.store.plan;
     if (plan == null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Cashflow & Financial Freedom',
-                style: TextStyle(fontSize: 24),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Insufficient data. Enter your spending target, net passive income, eligible invested portfolio and available cash. These are separate assumptions; account cash is never automatically treated as invested.',
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: edit,
-                child: const Text('Configure plan'),
-              ),
-            ],
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Cashflow & Financial Freedom',
+                  style: TextStyle(fontSize: 24),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Insufficient data. Enter your spending target, net passive income, eligible invested portfolio and available cash. These are separate assumptions; account cash is never automatically treated as invested.',
+                ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: edit,
+                  child: const Text('Configure plan'),
+                ),
+              ],
+            ),
           ),
-        ),
+        ],
       );
     }
     final projection = _projectionFor(plan);
@@ -66,6 +69,7 @@ class _FreedomScreenState extends State<FreedomScreen> {
     final coverage = ((plan.passive + draw) * 10000 ~/ plan.spending) / 100;
     final net = (loseSalary ? 0 : plan.earned) + plan.passive - plan.spending;
     return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       children: [
         Row(
