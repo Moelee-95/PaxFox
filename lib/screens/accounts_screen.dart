@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/presentation/busy_label.dart';
+
 import '../core/data/ledger_store.dart';
 import '../core/domain/ledger.dart';
 import '../core/presentation/async_action.dart';
@@ -373,7 +375,10 @@ class _AccountFormState extends State<AccountForm> {
             const SizedBox(height: 16),
             FilledButton(
               onPressed: busy ? null : save,
-              child: Text(busy ? 'Saving...' : 'Save account'),
+              child: BusyLabel(
+                busy: busy,
+                label: busy ? 'Saving...' : 'Save account',
+              ),
             ),
           ],
         ),

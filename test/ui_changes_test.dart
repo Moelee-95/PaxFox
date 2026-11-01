@@ -24,7 +24,7 @@ void main() {
   setUpAll(() async {
     if (!const bool.fromEnvironment('CAPTURE_UI')) return;
     final bytes = await File('assets/fonts/Roboto-Regular.ttf').readAsBytes();
-    for (final family in ['PaxleeRoboto', 'Roboto', 'Ahem']) {
+    for (final family in ['PaxFoxRoboto', 'Roboto', 'Ahem']) {
       await (FontLoader(
         family,
       )..addFont(Future.value(ByteData.sublistView(bytes)))).load();
@@ -70,6 +70,66 @@ void main() {
       image.dispose();
     });
   }
+
+  testWidgets(
+    'two-column add menu keeps six actions accessible on small phones',
+    (tester) async {
+      phone(tester);
+      await tester.runAsync(
+        () => store.completeSetup([
+          Account(
+            name: 'Cash',
+            currency: Currency.eur,
+            opening: 10000,
+            asOf: DateTime(2026),
+            kind: AccountKind.cash,
+          ),
+        ]),
+      );
+      await tester.pumpWidget(
+        RepaintBoundary(
+          key: previewKey,
+          child: MyApp(store: store),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Add transaction'));
+      await tester.pumpAndSettle();
+      await preview(tester, 'add-expense-income-light');
+      expect(
+        tester
+            .getCenter(find.byKey(const ValueKey('create-expense-manual')))
+            .dx,
+        lessThan(
+          tester
+              .getCenter(find.byKey(const ValueKey('create-income-manual')))
+              .dx,
+        ),
+      );
+      tester.binding.platformDispatcher.platformBrightnessTestValue =
+          Brightness.dark;
+      addTearDown(
+        tester.binding.platformDispatcher.clearPlatformBrightnessTestValue,
+      );
+      await tester.pumpAndSettle();
+      await preview(tester, 'add-expense-income-dark');
+      tester.view.physicalSize = const Size(320, 740);
+      tester.binding.platformDispatcher.textScaleFactorTestValue = 1.8;
+      addTearDown(
+        tester.binding.platformDispatcher.clearTextScaleFactorTestValue,
+      );
+      await tester.pumpAndSettle();
+      await preview(tester, 'add-expense-income-large-text');
+      for (final type in ['expense', 'income']) {
+        for (final action in ['manual', 'scan', 'upload']) {
+          final button = find.byKey(ValueKey('create-$type-$action'));
+          await tester.ensureVisible(button);
+          expect(button.hitTestable(), findsOneWidget);
+        }
+      }
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('CSV multi-select layout in light, dark and large text', (
     tester,
@@ -212,8 +272,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Add transaction'));
       await tester.pumpAndSettle();
-      expect(find.text('From gallery'), findsOneWidget);
-      await tester.tap(find.text('Add manually'));
+      expect(find.text('Upload file'), findsNWidgets(2));
+      await tester.tap(find.byKey(const ValueKey('create-expense-manual')));
       await tester.pumpAndSettle();
       final fieldContext = tester.element(find.byType(TextFormField).first);
       expect(

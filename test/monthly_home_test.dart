@@ -7,6 +7,67 @@ import 'package:moneva/core/presentation/selection_cards.dart';
 import 'package:moneva/screens/home_screen.dart';
 
 void main() {
+  testWidgets('month changes defer hidden tab rows until they are needed', (
+    tester,
+  ) async {
+    var month = DateTime(2026, 10);
+    var tab = 0;
+    final ledger = LedgerIndex.prepared([
+      for (final m in [10, 11])
+        for (final type in [EntryType.expense, EntryType.income])
+          for (var i = 0; i < 30; i++)
+            LedgerEntry(
+              type: type,
+              amount: 100,
+              currency: Currency.eur,
+              date: DateTime(2026, m),
+              description: '$m ${type.name} $i',
+              category: 'Test',
+            ),
+    ]);
+    var rowsBuilt = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (context, update) => HomeScreen(
+              month: month,
+              summary: ledger.forMonth(month),
+              tab: tab,
+              onTabChanged: (value) => update(() => tab = value),
+              onMonthChanged: (value) => update(() => month = value),
+              onCategoryChanged: (_) {},
+              tileBuilder: (entry) {
+                rowsBuilt++;
+                return ListTile(title: Text(entry.description));
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Income'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Monthly overview'));
+    await tester.pumpAndSettle();
+    rowsBuilt = 0;
+    await tester.tap(find.byTooltip('Next month'));
+    await tester.pumpAndSettle();
+    expect(
+      rowsBuilt,
+      0,
+      reason: 'Hidden transaction tabs must not lay out new months.',
+    );
+    await tester.tap(find.text('Expenses'));
+    await tester.pumpAndSettle();
+    expect(find.text('11 expense 0'), findsOneWidget);
+    expect(rowsBuilt, greaterThan(0));
+    await tester.drag(find.byType(TabBarView), const Offset(-650, 0));
+    await tester.pumpAndSettle();
+    expect(find.text('11 income 0'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
   testWidgets(
     'three visible Home tabs follow the month and support normal tab taps and swipes',
     (tester) async {

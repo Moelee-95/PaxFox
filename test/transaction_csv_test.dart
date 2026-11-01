@@ -443,7 +443,14 @@ void main() {
         expect(find.byType(DropdownButtonFormField<int>), findsNothing);
         await selectCsvCard(tester, 'csv-account', 'unassigned');
         await selectCsvCard(tester, 'csv-type', 'refund');
-        await tester.tap(find.text('Export CSV'));
+        await tester.runAsync(
+          tester
+                  .widget<OutlinedButton>(
+                    find.widgetWithText(OutlinedButton, 'Export CSV'),
+                  )
+                  .onPressed!
+              as Future<void> Function(),
+        );
         await tester.pumpAndSettle();
         importBytes = exported;
         final output = TransactionCsv.decode(
@@ -461,7 +468,14 @@ void main() {
         });
         final bank = store.accounts.firstWhere((a) => a.name == 'Bank').id!;
         await selectCsvCard(tester, 'csv-account', '$account');
-        await tester.tap(find.text('Export CSV'));
+        await tester.runAsync(
+          tester
+                  .widget<OutlinedButton>(
+                    find.widgetWithText(OutlinedButton, 'Export CSV'),
+                  )
+                  .onPressed!
+              as Future<void> Function(),
+        );
         await tester.pumpAndSettle();
         final bankOnly = TransactionCsv.decode(
           exported!,
@@ -789,7 +803,14 @@ void main() {
           find.text('Imported 1 transactions. Skipped 0 existing matches.'),
           findsOneWidget,
         );
-        await tester.tap(find.text('Export CSV'));
+        await tester.runAsync(
+          tester
+                  .widget<OutlinedButton>(
+                    find.widgetWithText(OutlinedButton, 'Export CSV'),
+                  )
+                  .onPressed!
+              as Future<void> Function(),
+        );
         await tester.pumpAndSettle();
         expect(
           decode(utf8.decode(exported!)).rows.single.entry.description,

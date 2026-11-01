@@ -1,19 +1,26 @@
 import 'package:flutter/material.dart';
 
-enum TransactionCreation { manual, scan, gallery }
+import '../domain/ledger.dart';
 
-Future<TransactionCreation?> showTransactionMenu(
+enum TransactionCreation { manual, scan, upload }
+
+typedef TransactionCreationRequest = ({
+  EntryType type,
+  TransactionCreation action,
+});
+
+Future<TransactionCreationRequest?> showTransactionMenu(
   BuildContext context, {
   required Rect anchor,
-}) => showGeneralDialog<TransactionCreation>(
+}) => showGeneralDialog<TransactionCreationRequest>(
   context: context,
   barrierDismissible: true,
   barrierLabel: 'Cancel adding transaction',
   barrierColor: Colors.white.withValues(alpha: 0.9),
   transitionDuration: const Duration(milliseconds: 180),
-  transitionBuilder: (context, animation, secondary, child) =>
+  transitionBuilder: (_, animation, _, child) =>
       FadeTransition(opacity: animation, child: child),
-  pageBuilder: (context, animation, secondary) => Material(
+  pageBuilder: (context, _, _) => Material(
     type: MaterialType.transparency,
     child: LayoutBuilder(
       builder: (context, constraints) {
@@ -35,46 +42,22 @@ Future<TransactionCreation?> showTransactionMenu(
               child: Align(
                 alignment: Alignment.centerRight,
                 child: ConstrainedBox(
-                  constraints: BoxConstraints(maxHeight: availableHeight),
+                  constraints: BoxConstraints(
+                    maxWidth: 560,
+                    maxHeight: availableHeight,
+                  ),
                   child: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      spacing: 12,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        for (final option in const [
-                          (
-                            action: TransactionCreation.manual,
-                            label: 'Add manually',
-                            icon: Icons.edit_note_outlined,
-                          ),
-                          (
-                            action: TransactionCreation.scan,
-                            label: 'Scan invoice',
-                            icon: Icons.document_scanner_outlined,
-                          ),
-                          (
-                            action: TransactionCreation.gallery,
-                            label: 'From gallery',
-                            icon: Icons.photo_library_outlined,
-                          ),
-                        ])
-                          FilledButton.tonalIcon(
-                            onPressed: () =>
-                                Navigator.pop(context, option.action),
-                            icon: Icon(option.icon, size: 24),
-                            label: Text(option.label),
-                            style: FilledButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 24,
-                                vertical: 16,
-                              ),
-                              shape: const StadiumBorder(),
-                              textStyle: Theme.of(context)
-                                  .textTheme
-                                  .titleMedium,
-                            ),
-                          ),
+                        for (final type in [
+                          EntryType.expense,
+                          EntryType.income,
+                        ]) ...[
+                          if (type == EntryType.income)
+                            const SizedBox(width: 12),
+                          Expanded(child: _CreationColumn(type: type)),
+                        ],
                       ],
                     ),
                   ),
@@ -96,3 +79,80 @@ Future<TransactionCreation?> showTransactionMenu(
     ),
   ),
 );
+
+class _CreationColumn extends StatelessWidget {
+  const _CreationColumn({required this.type});
+  final EntryType type;
+  @override
+  Widget build(BuildContext context) {
+    final income = type == EntryType.income;
+    final colors = Theme.of(context).colorScheme;
+    return Material(
+      color: colors.surface,
+      borderRadius: BorderRadius.circular(20),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Text(
+                income ? 'Income' : 'Expense',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: income
+                      ? Theme.of(context).brightness == Brightness.dark
+                            ? Colors.green.shade300
+                            : Colors.green.shade700
+                      : Theme.of(context).brightness == Brightness.dark
+                      ? Colors.red.shade300
+                      : Colors.red.shade700,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            for (final action in TransactionCreation.values)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: FilledButton.tonal(
+                  key: ValueKey('create-${type.name}-${action.name}'),
+                  onPressed: () =>
+                      Navigator.pop(context, (type: type, action: action)),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 60),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(switch (action) {
+                        TransactionCreation.manual => Icons.edit_note_outlined,
+                        TransactionCreation.scan =>
+                          Icons.document_scanner_outlined,
+                        TransactionCreation.upload =>
+                          Icons.upload_file_outlined,
+                      }, size: 22),
+                      const SizedBox(height: 6),
+                      Text(switch (action) {
+                        TransactionCreation.manual => 'Add manually',
+                        TransactionCreation.scan =>
+                          income ? 'Scan income' : 'Scan invoice',
+                        TransactionCreation.upload => 'Upload file',
+                      }, textAlign: TextAlign.center),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}

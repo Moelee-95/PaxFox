@@ -30,6 +30,43 @@ LedgerEntry entry(
 );
 
 void main() {
+  test('prepared reports match lazy reports for every month and currency', () {
+    final entries = List.generate(
+      5000,
+      (i) => entry(
+        EntryType.values[i % EntryType.values.length],
+        100 + i,
+        id: i + 1,
+        currency: Currency.values[i % Currency.values.length],
+        date: DateTime(2025, 1 + i % 24),
+        category: 'Category ${i % 17}',
+      ),
+    );
+    final lazy = LedgerIndex(entries);
+    final prepared = LedgerIndex.prepared(entries);
+    for (var i = 0; i < 25; i++) {
+      final month = DateTime(2025, 1 + i);
+      final actual = prepared.forMonth(month);
+      final expected = lazy.forMonth(month);
+      expect(actual.entries, expected.entries);
+      expect(actual.spendingEntries, expected.spendingEntries);
+      expect(actual.incomeEntries, expected.incomeEntries);
+      expect(actual.spendingByCategory, expected.spendingByCategory);
+      for (final currency in Currency.values) {
+        expect(
+          actual.totalsFor(currency).net,
+          expected.totalsFor(currency).net,
+        );
+        final ranking = actual.rankedCategories(currency);
+        expect(
+          ranking.map((e) => (e.key, e.value)),
+          expected.rankedCategories(currency).map((e) => (e.key, e.value)),
+        );
+        expect(actual.rankedCategories(currency), same(ranking));
+      }
+      expect(prepared.forMonth(month), same(actual));
+    }
+  });
   test('monthly summaries separate years, income, refunds and transfers', () {
     final ledger = LedgerIndex([
       entry(EntryType.income, 5000, id: 1),

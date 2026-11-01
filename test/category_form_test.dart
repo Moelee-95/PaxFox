@@ -25,7 +25,7 @@ void main() {
     sqfliteFfiInit();
     if (!const bool.fromEnvironment('CAPTURE_UI')) return;
     for (final entry in {
-      'PaxleeRoboto': 'assets/fonts/Roboto-Regular.ttf',
+      'PaxFoxRoboto': 'assets/fonts/Roboto-Regular.ttf',
       'MaterialIcons': 'C:/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
       'packages/font_awesome_flutter/FontAwesomeBrands': 'C:/Users/moham/AppData/Local/Pub/Cache/hosted/pub.dev/font_awesome_flutter-11.0.0/lib/fonts/Font-Awesome-7-Brands-Regular-400.otf',
       'packages/font_awesome_flutter/FontAwesomeSolid': 'C:/Users/moham/AppData/Local/Pub/Cache/hosted/pub.dev/font_awesome_flutter-11.0.0/lib/fonts/Font-Awesome-7-Free-Solid-900.otf',
@@ -163,7 +163,7 @@ void main() {
 
   test('v12 upgrade adds colors without losing categories, setup, entries or balances', () async {
     final directory = await Directory.systemTemp.createTemp(
-      'paxlee_category_v12_',
+      'paxfox_category_v12_',
     );
     final path = '${directory.path}/ledger.sqlite';
     final old = await LedgerStore.open(path: path, factory: databaseFactoryFfi);

@@ -14,9 +14,15 @@ import '../core/presentation/transaction_tile.dart';
 import '../features/receipts/invoice_source_details.dart';
 
 class TransactionForm extends StatefulWidget {
-  const TransactionForm({super.key, required this.store, this.entry});
+  const TransactionForm({
+    super.key,
+    required this.store,
+    this.entry,
+    this.initialType = EntryType.expense,
+  });
   final LedgerStore store;
   final LedgerEntry? entry;
+  final EntryType initialType;
   @override
   State<TransactionForm> createState() => _TransactionFormState();
 }
@@ -39,11 +45,12 @@ class _TransactionFormState extends State<TransactionForm> {
   void initState() {
     super.initState();
     final e = widget.entry;
-    if (e?.id != null) {
-      scannedInvoice = widget.store.scannedInvoiceFor(e!.id!);
+    if (e?.id != null &&
+        widget.store.scannedInvoiceTransactionIds.contains(e!.id)) {
+      scannedInvoice = widget.store.scannedInvoiceFor(e.id!);
     }
     currency = e?.currency ?? widget.store.currency;
-    type = e?.type ?? EntryType.expense;
+    type = e?.type ?? widget.initialType;
     date = e?.date ?? dateOnly(DateTime.now());
     accountId = e?.accountId;
     destinationId = e?.destinationId;
@@ -180,7 +187,12 @@ class _TransactionFormState extends State<TransactionForm> {
             ),
             children: [
               if (scannedInvoice != null)
-                InvoiceSourceDetails(source: scannedInvoice!),
+                InvoiceSourceDetails(
+                  source: scannedInvoice!,
+                  title: type == EntryType.income
+                      ? 'Income document'
+                      : 'Scanned invoice',
+                ),
               if (widget.entry?.createdAt != null)
                 Text(
                   'Added ${creationTimestamp(context, widget.entry!.createdAt!)}',

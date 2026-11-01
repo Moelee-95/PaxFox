@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 
 import '../core/domain/ledger.dart';
 import '../core/domain/number_format.dart';
@@ -53,6 +54,7 @@ class _HomeScreenState extends State<HomeScreen>
   late int _tab;
   bool _startedOnInfo = false;
   bool _forwardingDrag = false;
+  bool _draggingTabs = false;
 
   bool _handleTabScroll(ScrollNotification notification) {
     if (notification.depth != 0 ||
@@ -61,6 +63,9 @@ class _HomeScreenState extends State<HomeScreen>
     }
     if (notification is ScrollStartNotification &&
         notification.dragDetails != null) {
+      // Prepare the incoming page before a finger reveals it. Otherwise only
+      // the active tab needs new month data and selection/layout updates.
+      if (!_draggingTabs) setState(() => _draggingTabs = true);
       _startedOnInfo = _tabs.index == 2 && !_tabs.indexIsChanging;
     } else if (notification is OverscrollNotification &&
         _startedOnInfo &&
@@ -89,6 +94,7 @@ class _HomeScreenState extends State<HomeScreen>
         ),
       );
     } else if (notification is ScrollEndNotification) {
+      if (_draggingTabs) setState(() => _draggingTabs = false);
       if (_forwardingDrag) {
         _forwardingDrag = false;
         widget.onOverviewDragEnd?.call(
@@ -106,6 +112,15 @@ class _HomeScreenState extends State<HomeScreen>
     _tab = widget.tab;
     _tabs = TabController(length: 3, vsync: this, initialIndex: _tab);
     _tabs.addListener(_tabChanged);
+  }
+
+  @override
+  void didUpdateWidget(HomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.tab != _tabs.index) {
+      _tab = widget.tab;
+      _tabs.index = widget.tab;
+    }
   }
 
   void _tabChanged() {
@@ -128,6 +143,9 @@ class _HomeScreenState extends State<HomeScreen>
     final totals = widget.summary.totalsFor(widget.currency);
     Widget list(String view, List<LedgerEntry> entries, String empty) =>
         CustomScrollView(
+          // Keep a small scroll buffer without laying out several extra cards
+          // every time the month changes. Rows are still built on demand.
+          scrollCacheExtent: const ScrollCacheExtent.pixels(80),
           physics: const AlwaysScrollableScrollPhysics(),
           key: PageStorageKey(
             'home-$view-${widget.month.year}-${widget.month.month}',
@@ -251,6 +269,7 @@ class _HomeScreenState extends State<HomeScreen>
               controller: _tabs,
               children: [
                 RetainedPage(
+                  active: _tab == 0 || _draggingTabs,
                   child: list(
                     'expenses',
                     spending,
@@ -258,6 +277,7 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 ),
                 RetainedPage(
+                  active: _tab == 1 || _draggingTabs,
                   child: list(
                     'income',
                     income,
@@ -265,6 +285,7 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 ),
                 RetainedPage(
+                  active: _tab == 2 || _draggingTabs,
                   child: MonthlyOverview(
                     summary: widget.summary,
                     currency: widget.currency,

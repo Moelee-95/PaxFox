@@ -12,11 +12,11 @@ Snapshot: 2026-11-01 / base `eb4d9cf` with local updates. Start with [the short 
 | Home | `HomeScreen` | Selected month; three tabs: Expenses/refunds, Income and a compact info icon for Monthly overview. Expenses and Income get most of the width, with whole-unit amounts beside their labels (fractional units hidden in this header only). Standard TabBar/TabBarView taps and swipes switch between them. Monthly overview shows net cashflow and category spending with category icons; the month selector stays visible. A leftward drag starting on the info tab hands its edge overscroll to the main pager, revealing Overview with the same finger-tracked transition and bottom-bar synchronization. Rightward swipes still return to Income; a swipe starting on Income ends on the info tab. Month changes clear selection. |
 | Overview | `OverviewScreen` | Today's net wealth and spendable totals with large amounts and icon/title headings; compact account cards in a vertical list with wrapping names and edit actions, followed by compact red-highlighted editable debts; no redundant type captions; unpaid recurring shortcut and legacy-currency notice. |
 | Cashflow | `CashflowScreen` | Empty placeholder retained in bottom navigation for future functionality. |
-| More | `MoreScreen` | Profile card with local name/email editor, options search, colored-icon cards for all former drawer destinations (Home, All transactions, Categories, Accounts, Recurring, CSV, Settings). Management routes return to More on Back. Support group contains Help & FAQ, Rate App, Changelog, Privacy Policy, Terms and Conditions, About; all support actions are deferred by user request. No login/logout. Light/dark and wrapping layouts. |
+| More | `MoreScreen` | Profile card with local name/email editor, options search, colored-icon cards for All transactions, Categories, Accounts, Recurring, CSV and Settings. Home is available only in bottom navigation. Management routes return to More on Back. Support group contains Help & FAQ, Rate App, Changelog, Privacy Policy, Terms and Conditions, About; all support actions are deferred by user request. No login/logout. Light/dark and wrapping layouts. |
 | All transactions | `TransactionsScreen` | More destination inside the shell; app-bar/system Back restores More. All dates; case-insensitive description/category/notes search and type filter. Tap to edit, long-press to select. Filters persist across page recreation. |
-| Add menu | `showTransactionMenu` | Anchored to +; Add manually / Scan invoice / From gallery above an X. Translucent white modal barrier blocks background interactions. X, outside tap and Back cancel. Header scan shortcuts are removed. |
+| Add menu | `showTransactionMenu` | Unchanged floating + opens Expense left / Income right; each column offers Add manually, Scan and Upload file. White modal backdrop blocks background actions; close stays anchored to +. Manual preselects the chosen type. Upload accepts PDF/images; scan opens camera. Back/outside/close cancel. |
 | Manual/edit | `TransactionForm` | Visible type selection cards, description, amount with currency prefix, date, category, account cards, notes. Transfers get source/destination cards. Save is pinned; success returns Home. Editing supports confirmed delete, creation time and scanned-source expansion. |
-| Scan | `InvoiceScanScreen` | Auto-opens native camera, or gallery when using the floating gallery shortcut. Compact + card below pages expands to centered labeled Scan/Gallery actions; remove/reorder pages. Preparation has a 45-second per-page timeout and cancellation. Optimizes new pages before enabling extraction. Extract/progress/cancel stay in bottom safe area. Info icon reveals guidance. Back cancels extraction. |
+| Scan | `InvoiceScanScreen` | Auto-opens native camera, or file picker from Upload file. Expense/income mode controls extraction categories, prompt and review. Compact + card below pages expands to centered labeled Scan/Gallery actions; remove/reorder pages. Preparation has a 45-second per-page timeout and cancellation. Prepares images or PDFs before enabling extraction; original PDF bytes are retained. Extract/progress/cancel stay in bottom safe area. Info icon reveals guidance. Back cancels extraction. |
 | Invoice review | `InvoiceReviewScreen` | Photos, merchant/category, account cards, editable items with individual dates (one shared date only for legacy single-expense receipts) and calculated total. No charged-total/adjustment/notes inputs. Conditional app-currency confirmation checkbox. Info exposes guidance/original extraction. Save all together; legacy receipt mode can edit/delete its expense. |
 | Item editor | `InvoiceItemDialog` | Dialog with item name, signed price in app currency, category and invoice date; Apply returns a reviewed item. |
 | Accounts | `AccountsScreen` -> `AccountForm` | Bank/cash section with account icons, tappable policy icons and an inline Add account button. Add/edit name, type, availability, current balance and overdraft. Unused banks offer confirmed deletion; banks linked to transactions or any recurring/history rows and all cash accounts are protected. Add/edit/delete outstanding debts; zero records a repaid balance. Debts reduce net account wealth but do not post payments. List/form guidance lives in header info icons. Current balance correction adjusts opening baseline; existing opening date stays fixed. |
@@ -73,7 +73,7 @@ All screen files are under `lib/screens/`.
 | `category_form.dart` | Full-page category add/edit, type selector, live preview, palette, inline grouped icon search, safe async save. |
 | `recurring_screen.dart` | Rule/history list, retry/skip, `RecurringForm` and classification switches. |
 | `settings_screen.dart` | Extraction timeout form. |
-| `csv_screen.dart` | File picker/save adapters, preview/import/export UI; injectable file functions for tests. |
+| `csv_screen.dart` | File picker/save adapters, preview/import/export UI; CSV parsing/export preparation in workers; injectable file functions for tests. |
 
 ### Receipt pipeline
 
@@ -83,11 +83,11 @@ Files are under `lib/features/receipts/`.
 | --- | --- |
 | `invoice.dart` | `InvoiceDraft`, `InvoiceItem`, JSON parsing, quantity expansion, item errors and total validation. |
 | `invoice_scan_screen.dart` | Capture, page order, optimization state, extraction timeout/cancellation and review navigation. |
-| `invoice_review_screen.dart` | Review/edit/save and `InvoiceItemDialog`; converts extracted adjustments to visible items. |
-| `invoice_image_preparation.dart` | Native codec downsampling, orientation/resize/JPEG policy; isolate encoding; prepared-byte reuse; owned temporary file cleanup. |
+| `invoice_review_screen.dart` | Expense/income review/edit/save and `InvoiceItemDialog`; expense adjustments become visible items; income uses positive payments and receiving accounts. |
+| `invoice_image_preparation.dart` | Validated PDF passthrough or native image codec downsampling, orientation/resize/JPEG policy; isolate encoding; prepared-byte reuse; owned temporary file cleanup. |
 | `invoice_images.dart` | Persist private copies, resolve relative paths safely, delete owned attachments. |
-| `invoice_image_preview.dart` | Shared scan/review/source preview, display-sized decoding, cached stored-path resolution and unavailable-image feedback. |
-| `invoice_source_details.dart` | Scanned transaction attachments/original output; parses once and handles unavailable or malformed attachment metadata. |
+| `invoice_image_preview.dart` | Shared scan/review/source preview, display-sized decoding, cached stored-path resolution, PDF document cards and unavailable-image feedback. |
+| `invoice_source_details.dart` | Scanned transaction attachments/original output; parses once, shows loading progress and handles unavailable or malformed attachment metadata. |
 | `gemini_invoice_extractor.dart` | Injectable `InvoiceExtractor`; Gemini request, receipt prompt, limits, cancellation and response validation. |
 | `gemini_key_provider.dart` | Fetch/decrypt remote encrypted config, safe key-service errors; no plaintext service key embedded. |
 
@@ -99,8 +99,9 @@ Files are under `lib/core/presentation/`.
 | --- | --- |
 | `app_theme.dart` | Shared Material 3 palette, offline Roboto typography, cards, navigation and floating-label inputs for both brightness modes. |
 | `async_action.dart` | Duplicate-submit guard, safe failure state and disposal-aware completion shared by six form types. |
-| `store_status.dart` | Global recovery banner for committed writes awaiting a successful snapshot reload; retries reads only. |
-| `retained_page.dart` | Shared keep-alive wrapper for lazily mounted main destinations and Home's inner tabs; preserves scroll/controllers. |
+| `store_status.dart` | Global recovery banner for committed writes awaiting a successful snapshot reload; retries reads only. Independent refresh spinner leaves retained page content unchanged. |
+| `busy_label.dart` | Shared button label with an animated loading spinner, also used for background action feedback. |
+| `retained_page.dart` | Shared keep-alive wrapper for lazily mounted main destinations and Home's inner tabs; preserves scroll/controllers. Optional active flag defers hidden inner-tab child updates; main destinations remain live by default. |
 | `entry_type_picker.dart` | Shared single-row, horizontally scrollable transaction-type cards for manual entry, all-transactions filters and recurring; CSV reuses SelectionRow/SelectionCard for multi-selection. |
 | `debt_editor.dart` | Shared outstanding-debt editor for setup and Accounts; lender, balance, validation and confirmed deletion; guidance behind a title info icon. Delete/Cancel/Save share one row; outside taps dismiss unsaved drafts, while busy writes block dismissal. |
 | `selection_cards.dart` | Shared horizontal SelectionRow and SelectionCard appearance/semantics for transaction types and payment accounts. |
@@ -111,7 +112,7 @@ Files are under `lib/core/presentation/`.
 | `transaction_tile.dart` | Description-first cards, saved-color category badges, signed type-colored prices, visible Added on/transaction dates, adaptive wrapping and selection. |
 | `transaction_menu.dart` | Floating Manual/Scan/Gallery modal anchored to +. |
 | `profile_editor.dart` | Local name/optional email dialog, validation, atomic `saveProfile`, duplicate-submit guard and retryable saves. |
-| `month_selector.dart` | Independent draggable month pager and animated chevrons. |
+| `month_selector.dart` | Independent draggable month pager; commits after settling, 180ms chevrons and accumulated rapid-tap destinations. |
 | `metric_card.dart` | Icon/title heading, prominent amount and supporting detail. |
 | `responsive_pair.dart` | Two-column layout that stacks on narrow widths/large text. |
 | `category_icon_catalog.dart` | Human-readable names and nine display groups for 113 stable icon IDs, including brands. |
@@ -131,6 +132,7 @@ Files are under `test/`; names below omit `.dart`.
 | Number grouping, precise input and save/edit round-trip | `number_format_test` |
 | Money, balances, migrations, CRUD, accounts/categories | `ledger_test`, `account_policy_test`, `currency_debt_test` |
 | Cached totals/search/balances and snapshot lifecycle | `ledger_queries_test` |
+| Month slide/tap consistency and loading feedback without content rebuilds | `month_navigation_test`, `loading_feedback_test` |
 | Navigation rebuild regression, retained search/scroll and hidden-page live updates with 5,000 entries | `navigation_performance_test` |
 | Main navigation, onboarding, forms, refresh-visible UI | `widget_test`, `capture_ui_test`, `ui_changes_test`, `monthly_home_test`, `inline_overview_test`, `clean_layout_test`, `recurring_accounts_layout_test`, `home_edge_swipe_test` |
 | More navigation, search, deferred support, local profile persistence/editing and phone layouts | `more_screen_test` (optional `CAPTURE_UI` previews under `build/test-previews/`) |
@@ -143,6 +145,7 @@ Files are under `test/`; names below omit `.dart`.
 | Recurrence/idempotency/failure and flags/migration | `recurring_test`, `recurring_classification_test` |
 | CSV codec/database/native-adapter UI | `transaction_csv_test` |
 | Invoice domain, legacy receipts and item batches | `invoice_test`, `invoice_batch_test` |
+| Income documents, net payment filtering, PDF bytes/MIME, receiving accounts and Home return | `income_documents_test` |
 | Review validation/save and capture UI | `invoice_widget_test`, `capture_ui_test` |
 | Scanner timeout/cancel/preparation handoff | `invoice_scan_test` |
 | Compression, EXIF, cache, upload bytes and cleanup | `invoice_image_preparation_test` |
@@ -154,7 +157,9 @@ Files are under `test/`; names below omit `.dart`.
 
 ## Build, export and porting
 
-Display branding is Paxlee: Flutter app title and Home header, onboarding, More footer/About subtitle, recurring help, Android label, iOS display/bundle name and CSV export filenames. Internal package/application IDs and the existing database filename retain their original values for update/data compatibility. Bundled Roboto uses the `PaxleeRoboto` family alias.
+Launcher artwork is preserved at `assets/branding/app_icon_source.png`. Run `dart run tool/generate_app_icons.dart` from the repository root to regenerate Android density-specific legacy/adaptive icons and the iOS AppIcon catalog. The generator fills the source's black outer corners with navy, keeps adaptive artwork within the safe area and emits opaque iOS images. The source is a build input, not a runtime asset.
+
+Display branding is PaxFox: Flutter app title and Home header, onboarding, More footer/About subtitle, recurring help, Android label, iOS display/bundle name and CSV export filenames. Internal package/application IDs and the existing database filename retain their original values for update/data compatibility. Bundled Roboto uses the `PaxFoxRoboto` family alias.
 
 ```sh
 flutter pub get
@@ -164,6 +169,8 @@ flutter build apk --release
 ```
 
 Release APK: `build/app/outputs/flutter-apk/app-release.apk`. Use profile/release on a physical device for performance assessment; debug-mode timings are not representative. `flutter build apk --debug` remains available for debugging. Android identifier: `de.alhayali.moneva`; min SDK 24. `pubspec.yaml` sets app version/SDK/dependencies; `pubspec.lock` pins dependencies. iOS project targets 15.0; native camera/photo descriptions are in `ios/Runner/Info.plist`. Only `android/` and `ios/` platform scaffolds exist in this checkout. Data code supports Windows/Linux FFI, but desktop scaffolds/toolchains still need supplying. Web is not currently supported.
+
+For reproducible synthetic device frame measurements, `tool/profile_navigation.dart` uses an in-memory ledger and the opt-in Gradle property `paxfoxBenchmark=true` to install under `de.alhayali.moneva.benchmark`. See PERFORMANCE for exact commands and cleanup. Normal builds keep the existing app ID.
 
 | Port/export concern | Preserve or replace |
 | --- | --- |

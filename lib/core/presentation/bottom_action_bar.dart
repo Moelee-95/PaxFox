@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'busy_label.dart';
+
 class BottomActionBar extends StatelessWidget {
   const BottomActionBar({
     super.key,
@@ -25,12 +27,12 @@ class BottomActionBar extends StatelessWidget {
     child: icon == null
         ? FilledButton(
             onPressed: busy ? null : onPressed,
-            child: Text(busy ? busyLabel : label),
+            child: BusyLabel(busy: busy, label: busy ? busyLabel : label),
           )
         : FilledButton.icon(
             onPressed: busy ? null : onPressed,
-            icon: Icon(icon),
-            label: Text(busy ? busyLabel : label),
+            icon: busy ? null : Icon(icon),
+            label: BusyLabel(busy: busy, label: busy ? busyLabel : label),
           ),
   );
 }

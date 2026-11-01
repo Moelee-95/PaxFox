@@ -34,6 +34,8 @@ class InvoiceReviewScreen extends StatefulWidget {
 class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
   final form = GlobalKey<FormState>();
   Currency get currency => widget.store.currency;
+  EntryType get type => widget.draft.type;
+  bool get income => type == EntryType.income;
   late final TextEditingController merchant;
   late List<InvoiceItem> items;
   DateTime? date;
@@ -49,15 +51,23 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
     merchant = TextEditingController(
       text: widget.entry?.description ?? draft.merchant,
     );
-    items = expandInvoiceItems(
-      draft.items
-          .map(
-            (item) => item.withDate(
-              item.date ?? (draft.multipleInvoices ? null : draft.date),
-            ),
-          )
-          .toList(),
-    );
+    items = income
+        ? draft.items
+              .map(
+                (item) => item.withDate(
+                  item.date ?? (draft.multipleInvoices ? null : draft.date),
+                ),
+              )
+              .toList()
+        : expandInvoiceItems(
+            draft.items
+                .map(
+                  (item) => item.withDate(
+                    item.date ?? (draft.multipleInvoices ? null : draft.date),
+                  ),
+                )
+                .toList(),
+          );
     if ((draft.adjustment ?? 0) != 0) {
       items.add(
         InvoiceItem(
@@ -91,8 +101,9 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
         item: index == null ? null : items[index],
         initialDate: date,
         currency: currency,
+        type: type,
         categories: widget.store
-            .categoriesFor(EntryType.expense)
+            .categoriesFor(type)
             .map((c) => c.name)
             .toList(),
       ),
@@ -114,12 +125,12 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
       error = null;
     });
     final availableCategories = widget.store
-        .categoriesFor(EntryType.expense)
+        .categoriesFor(type)
         .map((c) => c.name)
         .toSet();
     final hasItemErrors = items.any(
       (item) =>
-          invoiceItemError(item, availableCategories) != null ||
+          invoiceItemError(item, availableCategories, type: type) != null ||
           (item.date == null && widget.entry == null),
     );
     final validForm = form.currentState!.validate();
@@ -133,6 +144,7 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
     var retained = <String>[];
     try {
       final draft = InvoiceDraft(
+        type: type,
         merchant: merchant.text.trim(),
         multipleInvoices: widget.draft.multipleInvoices,
         date: date,
@@ -145,10 +157,7 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
       );
       validateInvoice(
         draft,
-        widget.store
-            .categoriesFor(EntryType.expense)
-            .map((c) => c.name)
-            .toSet(),
+        widget.store.categoriesFor(type).map((c) => c.name).toSet(),
         currency: currency,
       );
       retained = await InvoiceImages().retain(widget.images);
@@ -183,26 +192,27 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
   @override
   Widget build(BuildContext context) {
     final sum = items.fold<int>(0, (sum, item) => sum + (item.total ?? 0));
-    final names = widget.store
-        .categoriesFor(EntryType.expense)
-        .map((c) => c.name)
-        .toList();
+    final names = widget.store.categoriesFor(type).map((c) => c.name).toList();
     return PopScope(
       canPop: !busy,
       child: Scaffold(
         bottomNavigationBar: BottomActionBar(
           label: widget.entry == null
-              ? 'Save transactions'
+              ? income
+                    ? 'Save income'
+                    : 'Save transactions'
               : 'Save invoice expense',
           busy: busy,
           onPressed: save,
         ),
         appBar: AppBar(
-          title: const Text('Review invoice'),
+          title: Text(income ? 'Review income' : 'Review invoice'),
           actions: [
             InfoButton(
               title: 'Invoice review information',
-              message: 'Review the extracted items. Each item saves as a separate transaction with its own description, price and category, using its own date and the payment account below. Discounts save as refunds. All items are saved together. The saved total is the sum of the reviewed items; check them against the original invoice.',
+              message: income
+                  ? 'Review received income only. Payslips should contain one net-payment entry. Statement expenses, own-account transfers, balances and unpaid invoices must not be saved as income. Confirm each payment date, amount, income category and receiving account before saving.'
+                  : 'Review the extracted items. Each item saves as a separate transaction with its own description, price and category, using its own date and the payment account below. Discounts save as refunds. All items are saved together. The saved total is the sum of the reviewed items; check them against the original invoice.',
               details: widget.draft.raw.isEmpty
                   ? null
                   : ExpansionTile(
@@ -291,8 +301,10 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
               TextFormField(
                 controller: merchant,
                 enabled: !busy,
-                decoration: const InputDecoration(
-                  labelText: 'Merchant / description',
+                decoration: InputDecoration(
+                  labelText: income
+                      ? 'Payer / description'
+                      : 'Merchant / description',
                 ),
                 validator: (s) =>
                     s == null || s.trim().isEmpty ? 'Enter a merchant.' : null,
@@ -336,8 +348,8 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
                 ),
               DropdownButtonFormField<String>(
                 initialValue: names.contains(category) ? category : null,
-                decoration: const InputDecoration(
-                  labelText: 'Expense category',
+                decoration: InputDecoration(
+                  labelText: income ? 'Income category' : 'Expense category',
                 ),
                 items: names
                     .map(
@@ -350,15 +362,19 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
               ),
               AccountPicker(
                 balances: widget.store.currentBalances.byAccount,
-                label: 'Paid from (cash or bank)',
+                label: income
+                    ? 'Received into (cash or bank)'
+                    : 'Paid from (cash or bank)',
                 accounts: widget.store.accounts
-                    .where((account) => account.available)
+                    .where((account) => income || account.available)
                     .toList(),
                 selectedId: accountId,
                 enabled: !busy,
                 onChanged: (id) => setState(() => accountId = id),
                 validator: (id) => id == null
-                    ? 'Choose the cash or bank account used to pay this invoice.'
+                    ? income
+                          ? 'Choose the receiving account for this income.'
+                          : 'Choose the cash or bank account used to pay this invoice.'
                     : null,
               ),
               const SizedBox(height: 20),
@@ -366,12 +382,24 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
                 'Items (${items.length})',
                 style: Theme.of(context).textTheme.titleLarge,
               ),
+              if (income && items.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Text(
+                    'No received income was identified. Check the document or add an income item manually.',
+                  ),
+                ),
               for (var i = 0; i < items.length; i++)
                 Card(
                   key: ValueKey('invoice-item-$i'),
                   shape:
                       showItemErrors &&
-                          (invoiceItemError(items[i], names.toSet()) != null ||
+                          (invoiceItemError(
+                                    items[i],
+                                    names.toSet(),
+                                    type: type,
+                                  ) !=
+                                  null ||
                               (items[i].date == null && widget.entry == null))
                       ? RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -413,12 +441,21 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
                         ),
                       ),
                       if (showItemErrors &&
-                          (invoiceItemError(items[i], names.toSet()) != null ||
+                          (invoiceItemError(
+                                    items[i],
+                                    names.toSet(),
+                                    type: type,
+                                  ) !=
+                                  null ||
                               (items[i].date == null && widget.entry == null)))
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                           child: Text(
-                            invoiceItemError(items[i], names.toSet()) ??
+                            invoiceItemError(
+                                  items[i],
+                                  names.toSet(),
+                                  type: type,
+                                ) ??
                                 'Choose the date for this item.',
                             style: TextStyle(
                               color: Theme.of(context).colorScheme.error,
@@ -433,7 +470,9 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
                 icon: const Icon(Icons.add),
                 label: const Text('Add item'),
               ),
-              Text('Items total: ${currency.display(sum)}'),
+              Text(
+                '${income ? 'Income total' : 'Items total'}: ${currency.display(sum)}',
+              ),
               if (error != null)
                 Text(
                   error!,
@@ -455,8 +494,10 @@ class InvoiceItemDialog extends StatefulWidget {
     required this.categories,
     this.currency = Currency.eur,
     this.initialDate,
+    this.type = EntryType.expense,
   });
   final Currency currency;
+  final EntryType type;
   final DateTime? initialDate;
   final InvoiceItem? item;
   final List<String> categories;
@@ -517,7 +558,10 @@ class _InvoiceItemDialogState extends State<InvoiceItemDialog> {
               ),
               validator: (s) {
                 try {
-                  signed(s ?? '');
+                  final amount = signed(s ?? '');
+                  if (widget.type == EntryType.income && amount <= 0) {
+                    return 'Enter a positive received amount.';
+                  }
                 } on FormatException catch (e) {
                   return e.message;
                 }
@@ -530,7 +574,9 @@ class _InvoiceItemDialogState extends State<InvoiceItemDialog> {
               validator: (_) => date == null ? 'Choose an item date.' : null,
               builder: (field) => InputDecorator(
                 decoration: InputDecoration(
-                  labelText: 'Invoice date',
+                  labelText: widget.type == EntryType.income
+                      ? 'Income date'
+                      : 'Invoice date',
                   errorText: field.errorText,
                 ),
                 child: ListTile(

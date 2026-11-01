@@ -41,7 +41,7 @@ class _MyAppState extends State<MyApp> {
     builder: (context, snapshot) {
       final store = snapshot.data;
       return MaterialApp(
-        title: 'Paxlee',
+        title: 'PaxFox',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light,
         darkTheme: AppTheme.dark,

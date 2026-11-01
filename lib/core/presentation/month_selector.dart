@@ -17,6 +17,7 @@ class _MonthSelectorState extends State<MonthSelector> {
   static const center = 12000;
   late final DateTime origin = widget.month;
   late final PageController pages = PageController(initialPage: center);
+  late int _targetPage = center;
   DateTime dateFor(int page) =>
       DateTime(origin.year, origin.month + page - center);
   @override
@@ -27,6 +28,8 @@ class _MonthSelectorState extends State<MonthSelector> {
         (widget.month.year - origin.year) * 12 +
         widget.month.month -
         origin.month;
+    if (oldWidget.month == widget.month) return;
+    _targetPage = target;
     if (pages.hasClients && pages.page!.round() != target) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && pages.hasClients) pages.jumpToPage(target);
@@ -41,8 +44,8 @@ class _MonthSelectorState extends State<MonthSelector> {
   }
 
   void move(int delta) => pages.animateToPage(
-    (pages.page ?? center.toDouble()).round() + delta,
-    duration: const Duration(milliseconds: 280),
+    _targetPage += delta,
+    duration: const Duration(milliseconds: 180),
     curve: Curves.easeOutCubic,
   );
 
@@ -64,17 +67,29 @@ class _MonthSelectorState extends State<MonthSelector> {
         Expanded(
           child: SizedBox(
             height: 64 * MediaQuery.textScalerOf(context).scale(1),
-            child: PageView.builder(
-              key: const ValueKey('month-pages'),
-              controller: pages,
-              onPageChanged: (page) => widget.onChanged(dateFor(page)),
-              itemBuilder: (context, index) => Center(
-                child: Text(
-                  MaterialLocalizations.of(context)
-                      .formatMonthYear(dateFor(index)),
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.titleLarge
-                      ?.copyWith(fontWeight: FontWeight.w700),
+            child: NotificationListener<ScrollEndNotification>(
+              onNotification: (notification) {
+                if (notification.depth != 0) return false;
+                final page = pages.page!.round();
+                _targetPage = page;
+                final month = dateFor(page);
+                if (month.year != widget.month.year ||
+                    month.month != widget.month.month) {
+                  widget.onChanged(month);
+                }
+                return false;
+              },
+              child: PageView.builder(
+                key: const ValueKey('month-pages'),
+                controller: pages,
+                itemBuilder: (context, index) => Center(
+                  child: Text(
+                    MaterialLocalizations.of(context)
+                        .formatMonthYear(dateFor(index)),
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleLarge
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
                 ),
               ),
             ),

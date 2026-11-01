@@ -37,7 +37,7 @@ flutter:
   assets:
     - assets/fonts/LICENSE.txt
   fonts:
-    - family: PaxleeRoboto
+    - family: PaxFoxRoboto
       fonts:
         - asset: assets/fonts/Roboto-Regular.ttf
         - asset: assets/fonts/Roboto-Medium.ttf

@@ -148,20 +148,15 @@ class TransactionTile extends StatelessWidget {
                               height: 1.3,
                               color: colors.onSurfaceVariant,
                             );
-                        final metadata = Wrap(
-                          spacing: 12,
-                          runSpacing: 2,
-                          children: [
+                        // One paragraph wraps naturally and avoids laying out
+                        // a separate text render object for each date label.
+                        final metadata = Text(
+                          [
                             if (entry.createdAt != null)
-                              Text(
-                                'Added on ${creationTimestamp(context, entry.createdAt!)}',
-                                style: metadataStyle,
-                              ),
-                            Text(
-                              'Date: ${dayKey(entry.date)}${entry.type == EntryType.refund ? ' \u00b7 Refund' : ''}',
-                              style: metadataStyle,
-                            ),
-                          ],
+                              'Added on ${creationTimestamp(context, entry.createdAt!)}',
+                            'Date: ${dayKey(entry.date)}${entry.type == EntryType.refund ? ' \u00b7 Refund' : ''}',
+                          ].join('  \u00b7  '),
+                          style: metadataStyle,
                         );
                         return Column(
                           mainAxisSize: MainAxisSize.min,

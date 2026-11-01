@@ -95,6 +95,20 @@ void main() {
       debugPrint('Warm navigation / 9 switches / 5000 entries: $counts');
     }
     expect(store!.entries.length, 5000);
+    final summary = store.monthSummary(DateTime.now());
+    final totals = Totals();
+    for (final entry in store.entries) {
+      totals.add(entry);
+    }
+    expect(summary.eurTotals.net, totals.net);
+    expect(
+      store.currentBalances.wealth,
+      accountBalance(
+        store.accounts.single,
+        store.entries,
+        dateOnly(DateTime.now()),
+      ),
+    );
     expect(
       counts,
       isEmpty,

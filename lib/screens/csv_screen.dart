@@ -41,6 +41,41 @@ Future<bool> saveCsvFile(String name, Uint8List bytes) async =>
     ) !=
     null;
 
+({Uint8List bytes, int count}) _encodeCsv(
+  ({
+    List<LedgerEntry> entries,
+    List<Account> accounts,
+    Set<EntryType> types,
+    Set<int?> accountIds,
+    Currency currency,
+  })
+  input,
+) {
+  final entries =
+      input.entries
+          .where(
+            (e) =>
+                e.currency == input.currency &&
+                input.types.contains(e.type) &&
+                (input.accountIds.contains(e.accountId) ||
+                    e.type == EntryType.transfer &&
+                        input.accountIds.contains(e.destinationId)),
+          )
+          .toList()
+        ..sort((a, b) => a.date.compareTo(b.date));
+  if (entries.isEmpty) {
+    throw const FormatException(
+      'No transactions match the selected accounts and types.',
+    );
+  }
+  return (
+    bytes: Uint8List.fromList(
+      utf8.encode(TransactionCsv.encode(entries, accounts: input.accounts)),
+    ),
+    count: entries.length,
+  );
+}
+
 CsvPreview _decodeCsv(
   ({
     Uint8List bytes,
@@ -118,6 +153,7 @@ class _CsvScreenState extends State<CsvScreen> {
   String? result;
 
   Future<void> run(Future<void> Function() action) async {
+    if (busy) return;
     setState(() {
       busy = true;
       error = null;
@@ -162,35 +198,21 @@ class _CsvScreenState extends State<CsvScreen> {
   });
 
   Future<void> export() => run(() async {
-    final entries =
-        widget.store.entries
-            .where(
-              (e) =>
-                  e.currency == widget.store.currency &&
-                  types.contains(e.type) &&
-                  (accountIds.contains(e.accountId) ||
-                      e.type == EntryType.transfer &&
-                          accountIds.contains(e.destinationId)),
-            )
-            .toList()
-          ..sort((a, b) => a.date.compareTo(b.date));
-    if (entries.isEmpty) {
-      throw const FormatException(
-        'No transactions match the selected accounts and types.',
-      );
-    }
+    final encoded = await compute(_encodeCsv, (
+      entries: widget.store.entries,
+      accounts: widget.store.accounts,
+      types: {...types},
+      accountIds: {...accountIds},
+      currency: widget.store.currency,
+    ));
+    if (!mounted) return;
     final saved = await widget.saveFile(
-      'paxlee_transactions_${dayKey(DateTime.now())}.csv',
-      Uint8List.fromList(
-        utf8.encode(
-          TransactionCsv.encode(entries, accounts: widget.store.accounts),
-        ),
-      ),
+      'paxfox_transactions_${dayKey(DateTime.now())}.csv',
+      encoded.bytes,
     );
     if (mounted && saved) {
       setState(
-        () =>
-            result = 'Exported ${formatInteger(entries.length)} transactions.',
+        () => result = 'Exported ${formatInteger(encoded.count)} transactions.',
       );
     }
   });

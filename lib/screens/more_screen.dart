@@ -4,7 +4,6 @@ import '../core/data/ledger_store.dart';
 import '../core/presentation/profile_editor.dart';
 
 enum MoreDestination {
-  home('Home', 'Your monthly activity', Icons.home_outlined, Colors.blue),
   transactions(
     'All transactions',
     'Search and manage your transactions',
@@ -82,7 +81,7 @@ const _supportOptions = [
   ),
   (
     title: 'About',
-    subtitle: 'About Paxlee',
+    subtitle: 'About PaxFox',
     icon: Icons.info_outline,
     color: Colors.blueGrey,
   ),
@@ -222,7 +221,7 @@ class _MoreScreenState extends State<MoreScreen> {
         ),
       (_) => const SizedBox(height: 32),
       (_) => Text(
-        'Paxlee',
+        'PaxFox',
         textAlign: TextAlign.center,
         style: theme.textTheme.titleLarge?.copyWith(
           color: colors.primary,

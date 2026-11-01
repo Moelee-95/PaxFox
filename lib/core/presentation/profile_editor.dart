@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'busy_label.dart';
+
 import '../data/ledger_store.dart';
 import 'async_action.dart';
 
@@ -98,7 +100,10 @@ class _ProfileEditorState extends State<ProfileEditor> {
         ),
         FilledButton(
           onPressed: _action.busy ? null : _save,
-          child: Text(_action.busy ? 'Saving...' : 'Save profile'),
+          child: BusyLabel(
+            busy: _action.busy,
+            label: _action.busy ? 'Saving...' : 'Save profile',
+          ),
         ),
       ],
     ),

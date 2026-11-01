@@ -9,6 +9,7 @@ import '../core/data/ledger_store.dart';
 import '../core/domain/ledger.dart';
 import '../core/domain/number_format.dart';
 import '../core/presentation/ledger_refresh.dart';
+import '../core/presentation/busy_label.dart';
 import '../core/presentation/retained_page.dart';
 import '../core/presentation/transaction_tile.dart';
 import '../core/presentation/transaction_menu.dart';
@@ -46,6 +47,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   String? _recurringError;
   final Set<int> _selectedIds = {};
   bool _bulkBusy = false;
+  bool _openingTransaction = false;
   int _homeTab = 0;
   String? _homeCategory;
   int _navigationIndex = 0;
@@ -238,7 +240,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         )) {
       return;
     }
-    _checkingRecurring = true;
+    setState(() => _checkingRecurring = true);
     try {
       await widget.store.processRecurring();
       if (mounted) {
@@ -254,7 +256,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         _recurringChanges.value++;
       }
     } finally {
-      _checkingRecurring = false;
+      if (mounted) setState(() => _checkingRecurring = false);
     }
   }
 
@@ -278,8 +280,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       anchor: button.localToGlobal(Offset.zero) & button.size,
     );
     if (!mounted || action == null) return;
-    if (action == TransactionCreation.manual) {
-      await _editTransaction();
+    if (action.action == TransactionCreation.manual) {
+      await _editTransaction(initialType: action.type);
       return;
     }
     final saved = await Navigator.push<bool>(
@@ -287,16 +289,25 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       MaterialPageRoute<bool>(
         builder: (_) => InvoiceScanScreen(
           store: widget.store,
-          initialGallery: action == TransactionCreation.gallery,
+          type: action.type,
+          initialUpload: action.action == TransactionCreation.upload,
         ),
       ),
     );
-    if (saved == true && mounted) _goHome();
+    if (saved == true && mounted) _goHome(type: action.type);
   }
 
-  Future<void> _editTransaction([LedgerEntry? entry]) async {
+  Future<void> _editTransaction({
+    LedgerEntry? entry,
+    EntryType initialType = EntryType.expense,
+  }) async {
+    if (_openingTransaction) return;
     _exitTimer?.cancel();
     try {
+      if (entry?.id != null &&
+          widget.store.receiptTransactionIds.contains(entry!.id)) {
+        setState(() => _openingTransaction = true);
+      }
       final receipt =
           entry?.id == null ||
               !widget.store.receiptTransactionIds.contains(entry!.id)
@@ -305,10 +316,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       if (!mounted) {
         return;
       }
+      if (_openingTransaction) setState(() => _openingTransaction = false);
       final saved = await Navigator.of(context).push<bool>(
         MaterialPageRoute<bool>(
           builder: (_) => receipt == null
-              ? TransactionForm(store: widget.store, entry: entry)
+              ? TransactionForm(
+                  store: widget.store,
+                  entry: entry,
+                  initialType: initialType,
+                )
               : InvoiceReviewScreen(
                   store: widget.store,
                   entry: entry,
@@ -323,7 +339,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         ),
       );
       if (saved == true && mounted) {
-        _goHome();
+        _goHome(type: entry == null ? initialType : null);
       }
     } catch (_) {
       if (mounted) {
@@ -333,22 +349,26 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           ),
         );
       }
+    } finally {
+      if (mounted && _openingTransaction) {
+        setState(() => _openingTransaction = false);
+      }
     }
   }
 
-  void _goHome() {
-    _changeHome(
-      () => _month = DateTime(DateTime.now().year, DateTime.now().month),
-    );
+  void _goHome({EntryType? type}) {
+    _changeHome(() {
+      _month = DateTime(DateTime.now().year, DateTime.now().month);
+      if (type != null) {
+        _homeTab = type == EntryType.income ? 1 : 0;
+        _homeCategory = null;
+      }
+    });
     _selectPage(0);
   }
 
   void _openMenu(MoreDestination destination) {
     _exitTimer?.cancel();
-    if (destination == MoreDestination.home) {
-      _selectPage(0);
-      return;
-    }
     if (destination == MoreDestination.transactions) {
       setState(() {
         _showTransactions = true;
@@ -404,7 +424,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         onTap: _bulkBusy
             ? null
             : () => _selectedIds.isEmpty
-                  ? _editTransaction(entry)
+                  ? _editTransaction(entry: entry)
                   : _toggleSelection(entry),
       );
 
@@ -509,7 +529,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                 child: LinearProgressIndicator(),
               )
             : null,
-        actions: _selectedIds.isNotEmpty ? _selectionActions() : null,
+        actions: _selectedIds.isNotEmpty
+            ? _selectionActions()
+            : [
+                if (_openingTransaction || _checkingRecurring)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: BusyLabel(busy: true, label: ''),
+                  ),
+              ],
         title: Text(
           _selectedIds.isNotEmpty
               ? '${formatInteger(_selectedIds.length)} selected'
@@ -521,7 +549,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               ? 'Cashflow'
               : _navigationIndex == 3
               ? 'More'
-              : 'Paxlee',
+              : 'PaxFox',
         ),
         leading: _selectedIds.isNotEmpty
             ? IconButton(

@@ -16,7 +16,9 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "de.alhayali.moneva"
+        // An isolated installation for the synthetic device profiling harness.
+        applicationId = if (providers.gradleProperty("paxfoxBenchmark").orNull == "true")
+            "de.alhayali.moneva.benchmark" else "de.alhayali.moneva"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 24

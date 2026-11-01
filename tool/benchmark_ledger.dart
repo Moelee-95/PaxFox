@@ -58,6 +58,33 @@ void main() {
   );
 
   final index = LedgerIndex(entries);
+  // Report preparation is paid before publishing a snapshot, not while the
+  // month title/list are animating. Compare first visits, excluding preparation.
+  double firstVisits(LedgerIndex ledger) {
+    final timer = Stopwatch()..start();
+    for (var i = 0; i < 80; i++) {
+      final summary = ledger.forMonth(DateTime(2020, 1 + i));
+      summary.rankedCategories(Currency.eur);
+    }
+    timer.stop();
+    return timer.elapsedMicroseconds / 1000;
+  }
+
+  final lazyVisits = <double>[];
+  final preparedVisits = <double>[];
+  for (var i = 0; i < 7; i++) {
+    lazyVisits.add(firstVisits(LedgerIndex(entries)));
+    preparedVisits.add(firstVisits(LedgerIndex.prepared(entries)));
+  }
+  lazyVisits.sort();
+  preparedVisits.sort();
+  stdout.writeln('First visits to 80 months (lazy): ${lazyVisits[3]} ms');
+  stdout.writeln(
+    'First visits to 80 months (prepared): ${preparedVisits[3]} ms',
+  );
+  stdout.writeln(
+    'Preparation cost moved before navigation: ${medianMicroseconds(() => LedgerIndex.prepared(entries).entries.length) / 1000} ms (large stored snapshots use a worker isolate)',
+  );
   final month = DateTime(2025, 10);
   int scanMonth() {
     final totals = Totals();

@@ -256,6 +256,8 @@ void main() {
     );
 
     test('commit followed by failed reload returns success; reload does not duplicate', () async {
+      final progress = <bool>[];
+      store.refreshing.addListener(() => progress.add(store.refreshing.value));
       await failReload();
       await save();
       expect(store.snapshotNeedsRefresh, isTrue);
@@ -265,6 +267,8 @@ void main() {
       await store.refresh();
       expect(store.snapshotNeedsRefresh, isFalse);
       expect(store.entries.single.description, 'Saved once');
+      expect(progress, [true, false, true, false]);
+      expect(store.refreshing.value, isFalse);
     });
 
     testWidgets('recovery banner retries safely while preserving navigation', (

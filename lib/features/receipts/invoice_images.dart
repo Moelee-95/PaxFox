@@ -20,7 +20,10 @@ class InvoiceImages {
     try {
       final prefix = '${DateTime.now().microsecondsSinceEpoch}';
       for (var i = 0; i < files.length; i++) {
-        final relative = p.join('receipts', '$prefix-$i.jpg');
+        final relative = p.join(
+          'receipts',
+          '$prefix-$i.${isInvoicePdf(files[i]) ? 'pdf' : 'jpg'}',
+        );
         final target = await resolve(relative);
         await target.parent.create(recursive: true);
         final bytes = await InvoiceImagePreparation.bytesFor(files[i]);

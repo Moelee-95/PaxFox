@@ -20,7 +20,7 @@ void main() {
   setUpAll(() async {
     if (!const bool.fromEnvironment('CAPTURE_UI')) return;
     for (final entry in {
-      'PaxleeRoboto': 'assets/fonts/Roboto-Regular.ttf',
+      'PaxFoxRoboto': 'assets/fonts/Roboto-Regular.ttf',
       'Roboto': 'assets/fonts/Roboto-Regular.ttf',
       'MaterialIcons': 'C:/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
     }.entries) {
@@ -142,9 +142,9 @@ void main() {
       expect(find.byIcon(Icons.more_horiz), findsOneWidget);
       expect(find.byTooltip('Add transaction'), findsNothing);
       expect(find.text('Your profile'), findsOneWidget);
+      expect(find.widgetWithText(ListTile, 'Home'), findsNothing);
       for (final destination in MoreDestination.values) {
         final tile = find.widgetWithText(ListTile, destination.label);
-        if (destination == MoreDestination.home) continue;
         await showOption(tester, tile);
         expect(tile, findsOneWidget);
         await tester.tap(tile);
@@ -165,12 +165,7 @@ void main() {
         );
         expect(find.byType(MoreScreen), findsOneWidget);
       }
-      await showOption(
-        tester,
-        find.widgetWithText(ListTile, 'Home'),
-        fromTop: true,
-      );
-      await tester.tap(find.widgetWithText(ListTile, 'Home'));
+      await tester.tap(tab('Home'));
       await tester.pumpAndSettle();
       expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,

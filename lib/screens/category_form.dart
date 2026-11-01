@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/presentation/busy_label.dart';
+
 import '../core/data/ledger_store.dart';
 import '../core/domain/category.dart';
 import '../core/presentation/async_action.dart';
@@ -473,7 +475,10 @@ class _CategoryFormState extends State<CategoryForm> {
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ),
-                  child: Text(_action.busy ? 'Saving...' : 'Save category'),
+                  child: BusyLabel(
+                    busy: _action.busy,
+                    label: _action.busy ? 'Saving...' : 'Save category',
+                  ),
                 ),
               ],
             ),

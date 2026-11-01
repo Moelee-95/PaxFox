@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/presentation/busy_label.dart';
+
 import '../core/presentation/grouped_amount_formatter.dart';
 
 import '../core/data/ledger_store.dart';
@@ -141,7 +143,7 @@ class _SetupScreenState extends State<SetupScreen> {
     canPop: false,
     child: Scaffold(
       appBar: AppBar(
-        title: const Text('Welcome to Paxlee'),
+        title: const Text('Welcome to PaxFox'),
         automaticallyImplyLeading: false,
       ),
       body: Center(
@@ -403,8 +405,9 @@ class _SetupScreenState extends State<SetupScreen> {
               const SizedBox(height: 24),
               FilledButton(
                 onPressed: saving ? null : next,
-                child: Text(
-                  saving
+                child: BusyLabel(
+                  busy: saving,
+                  label: saving
                       ? 'Saving...'
                       : step == 2
                       ? 'Finish setup'

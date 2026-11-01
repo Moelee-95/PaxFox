@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/presentation/busy_label.dart';
+
 import '../core/data/ledger_store.dart';
 import '../core/domain/ledger.dart';
 import '../core/domain/recurring.dart';
@@ -13,7 +15,7 @@ import '../core/presentation/ledger_refresh.dart';
 import '../core/presentation/responsive_pair.dart';
 
 const _recurringInfo =
-    'Monthly expenses and income are posted automatically when you open or resume Paxlee. Missed due dates are caught up. No bank connection: this updates your local ledger, not your real bank. Days 29-31 use the last day in shorter months. No weekend adjustment.';
+    'Monthly expenses and income are posted automatically when you open or resume PaxFox. Missed due dates are caught up. No bank connection: this updates your local ledger, not your real bank. Days 29-31 use the last day in shorter months. No weekend adjustment.';
 const _recurringHistoryInfo =
     'Unpaid occurrences keep their original amount and account. Retry books the payment on today\'s date and preserves its scheduled due date in this history. Editing a rule affects future occurrences only. If a posted payment is edited or deleted in Transactions, it is never automatically recreated.';
 const _recurringFormInfo =
@@ -30,6 +32,7 @@ class _RecurringScreenState extends State<RecurringScreen> {
   bool busy = false;
   String? error;
   Future<void> action(Future<void> Function() work) async {
+    if (busy) return;
     setState(() {
       busy = true;
       error = null;
@@ -84,7 +87,9 @@ class _RecurringScreenState extends State<RecurringScreen> {
           onPressed: busy
               ? null
               : () => action(() => widget.store.processRecurring()),
-          icon: const Icon(Icons.refresh),
+          icon: busy
+              ? const BusyLabel(busy: true, label: '')
+              : const Icon(Icons.refresh),
         ),
       ],
     ),

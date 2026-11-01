@@ -30,7 +30,7 @@ abstract final class AppTheme {
     return ThemeData(
       useMaterial3: true,
       colorScheme: colors,
-      fontFamily: 'PaxleeRoboto',
+      fontFamily: 'PaxFoxRoboto',
       scaffoldBackgroundColor: colors.surface,
       appBarTheme: AppBarTheme(
         backgroundColor: colors.surface,

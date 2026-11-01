@@ -4,6 +4,9 @@ import 'dart:io';
 import 'package:cunning_document_scanner/cunning_document_scanner.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import '../../core/data/ledger_store.dart';
 import '../../core/domain/app_failure.dart';
@@ -22,6 +25,9 @@ class InvoiceScanScreen extends StatefulWidget {
     this.extractor,
     this.autoCapture = true,
     this.initialGallery = false,
+    this.initialUpload = false,
+    this.type = EntryType.expense,
+    this.uploadPicker,
     this.preparationTimeout = const Duration(seconds: 45),
     this.initialImages = const [],
     this.extractionTimeout,
@@ -31,6 +37,9 @@ class InvoiceScanScreen extends StatefulWidget {
   final InvoiceExtractor? extractor;
   final bool autoCapture;
   final bool initialGallery;
+  final bool initialUpload;
+  final EntryType type;
+  final Future<List<File>> Function()? uploadPicker;
   final Duration preparationTimeout;
   final List<File> initialImages;
   final Duration? extractionTimeout;
@@ -95,12 +104,15 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
     images.addAll(widget.initialImages);
     if (widget.autoCapture) {
       WidgetsBinding.instance.addPostFrameCallback(
-        (_) => capture(gallery: widget.initialGallery),
+        (_) => capture(
+          gallery: widget.initialGallery,
+          upload: widget.initialUpload,
+        ),
       );
     }
   }
 
-  Future<void> capture({bool gallery = false}) async {
+  Future<void> capture({bool gallery = false, bool upload = false}) async {
     if (busy || images.length >= 10) {
       return;
     }
@@ -109,15 +121,77 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
       busy = true;
       error = null;
     });
+    Directory? uploadSources;
     try {
-      final paths = gallery
-          ? (await ImagePicker().pickMultiImage()).map((i) => i.path).toList()
-          : await CunningDocumentScanner.getPictures(
-              noOfPages: 10 - images.length,
+      List<String>? paths;
+      if (upload && widget.uploadPicker != null) {
+        paths = (await widget.uploadPicker!())
+            .map((file) => file.path)
+            .toList();
+      } else if (upload) {
+        final selected = await FilePicker.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: [
+            'pdf',
+            'jpg',
+            'jpeg',
+            'png',
+            'webp',
+            'heic',
+            'heif',
+          ],
+          dialogTitle: 'Upload images or PDF',
+        );
+        paths = [];
+        if (selected.isNotEmpty) {
+          uploadSources = await (await getTemporaryDirectory()).createTemp(
+            'paxfox-upload-',
+          );
+          for (final picked in selected.take(10 - images.length)) {
+            if (mounted) {
+              setState(
+                () =>
+                    _preparationStage = 'Loading document ${paths!.length + 1}',
+              );
+            }
+            if (!mounted || currentCapture != captureId) break;
+            final extension = p.extension(picked.name).toLowerCase();
+            final target = File(
+              p.join(uploadSources.path, '${paths.length}$extension'),
             );
-      if (mounted && currentCapture == captureId && paths != null) {
+            final sink = target.openWrite();
+            var count = 0;
+            try {
+              await for (final bytes in picked.readAsByteStream().timeout(
+                widget.preparationTimeout,
+              )) {
+                count += bytes.length;
+                if (count > maxInvoiceSourceBytes) {
+                  throw const FormatException('A document exceeds 25 MB.');
+                }
+                if (!mounted || currentCapture != captureId) {
+                  throw const FormatException('Upload cancelled.');
+                }
+                sink.add(bytes);
+              }
+              await sink.flush();
+            } finally {
+              await sink.close();
+            }
+            paths.add(target.path);
+          }
+        }
+      } else {
+        paths = gallery
+            ? (await ImagePicker().pickMultiImage()).map((i) => i.path).toList()
+            : await CunningDocumentScanner.getPictures(
+                noOfPages: 10 - images.length,
+              );
+      }
+      final selectedPaths = paths;
+      if (mounted && currentCapture == captureId && selectedPaths != null) {
         final room = 10 - images.length;
-        final pages = paths.take(room).toList();
+        final pages = selectedPaths.take(room).toList();
         var failed = 0;
         var timedOut = false;
         for (var i = 0; i < pages.length; i++) {
@@ -160,19 +234,30 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
                 ? 'Image optimization timed out. Try again with a smaller image or scan fewer pages.'
                 : failed > 0
                 ? '$failed image(s) could not be prepared. Try a JPEG/PNG under 25 MB or scan again.'
-                : paths.length > room
+                : selectedPaths.length > room
                 ? 'Only the first $room selected images were added. Maximum 10 pages.'
                 : null;
           });
         }
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted && currentCapture == captureId) {
         setState(
-          () => error = 'Camera unavailable or permission denied. Try gallery images, or enable camera access in device settings.',
+          () => error = upload
+              ? e is FormatException
+                    ? e.message
+                    : 'File unavailable. Choose a readable image or PDF and try again.'
+              : 'Camera unavailable or permission denied. Try gallery images, or enable camera access in device settings.',
         );
       }
     } finally {
+      if (uploadSources != null) {
+        try {
+          await uploadSources.delete(recursive: true);
+        } catch (_) {
+          /* Owned temporary copies only. */
+        }
+      }
       if (mounted && currentCapture == captureId) {
         setState(() {
           busy = false;
@@ -188,7 +273,21 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
       MaterialPageRoute(
         builder: (_) => InvoiceReviewScreen(
           store: widget.store,
-          draft: draft,
+          draft: widget.type == draft.type
+              ? draft
+              : InvoiceDraft(
+                  type: widget.type,
+                  merchant: draft.merchant,
+                  date: draft.date,
+                  multipleInvoices: draft.multipleInvoices,
+                  currency: draft.currency,
+                  total: draft.total,
+                  category: draft.category,
+                  adjustment: draft.adjustment,
+                  adjustmentNote: draft.adjustmentNote,
+                  items: draft.items,
+                  raw: draft.raw,
+                ),
           images: List.of(images),
         ),
       ),
@@ -215,6 +314,7 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
         GeminiInvoiceExtractor(
           timeout: timeout,
           currency: widget.store.currency,
+          type: widget.type,
           onProgress: (value) {
             if (mounted && requestId == currentRequest) {
               stage = value;
@@ -243,10 +343,7 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
     try {
       final draft = await activeExtractor!.extract(
         List.of(images),
-        widget.store
-            .categoriesFor(EntryType.expense)
-            .map((c) => c.name)
-            .toSet(),
+        widget.store.categoriesFor(widget.type).map((c) => c.name).toSet(),
       );
       if (mounted && requestId == currentRequest) {
         extractionTimer?.cancel();
@@ -283,11 +380,15 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
     },
     child: Scaffold(
       appBar: AppBar(
-        title: const Text('Scan invoice'),
-        actions: const [
+        title: Text(
+          widget.type == EntryType.income ? 'Scan income' : 'Scan invoice',
+        ),
+        actions: [
           InfoButton(
             title: 'Invoice scanning information',
-            message: 'Add pages from one or more invoices, in order. Each extracted item has its own invoice date. Maximum 10 pages. Review every extracted price and category before saving.',
+            message: widget.type == EntryType.income
+                ? 'Upload or scan payslips, statements or paid customer invoices. Payslips use net pay as one income entry. Only received income is extracted; outgoing payments, internal transfers and balances are excluded. Images and PDFs are supported. Review every amount, date and category before saving.'
+                : 'Add pages from one or more invoices, in order. Each extracted item has its own invoice date. Maximum 10 files or scanned pages. Images and PDFs are supported. Review every extracted price and category before saving.',
           ),
         ],
       ),
@@ -353,7 +454,9 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
-                      Text('Page ${i + 1}'),
+                      Text(
+                        '${isInvoicePdf(images[i]) ? 'PDF' : 'Page'} ${i + 1}',
+                      ),
                       IconButton(
                         tooltip: 'Move page earlier',
                         onPressed: busy || i == 0
@@ -394,6 +497,13 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
                               : () => capture(),
                           icon: const Icon(Icons.document_scanner_outlined),
                           label: const Text('Scan'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: busy || images.length >= 10
+                              ? null
+                              : () => capture(upload: true),
+                          icon: const Icon(Icons.upload_file_outlined),
+                          label: const Text('Upload file'),
                         ),
                         OutlinedButton.icon(
                           onPressed: busy || images.length >= 10

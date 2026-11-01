@@ -43,7 +43,7 @@ void main() {
       final navigationPoint = tester.getCenter(find.text('Cashflow'));
       await tester.tap(find.byTooltip('Add transaction'));
       await tester.pumpAndSettle();
-      expect(find.text('Add manually'), findsOneWidget);
+      expect(find.text('Add manually'), findsNWidgets(2));
       expect(find.text('Scan invoice'), findsOneWidget);
       expect(
         tester.getRect(find.byTooltip('Cancel adding transaction')),
@@ -95,7 +95,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Add transaction'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Add manually'));
+      await tester.tap(find.byKey(const ValueKey('create-expense-manual')));
       await tester.pumpAndSettle();
       expect(find.text('Save transaction'), findsOneWidget);
       expect(find.byTooltip('Scan invoice'), findsNothing);
@@ -115,7 +115,7 @@ void main() {
     },
   );
   testWidgets(
-    'gallery shortcut opens the scanner with gallery selection and no camera launch',
+    'upload shortcut opens the scanner in file-selection mode without camera or gallery',
     (tester) async {
       const gallery = MethodChannel('plugins.flutter.io/image_picker');
       const camera = MethodChannel('cunning_document_scanner');
@@ -146,10 +146,16 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Add transaction'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('From gallery'));
+      await tester.tap(find.byKey(const ValueKey('create-expense-upload')));
       await tester.pumpAndSettle();
       expect(find.byType(InvoiceScanScreen), findsOneWidget);
-      expect(picked, 1);
+      expect(picked, 0);
+      expect(
+        tester
+            .widget<InvoiceScanScreen>(find.byType(InvoiceScanScreen))
+            .initialUpload,
+        isTrue,
+      );
       expect(scanned, 0);
       expect(tester.takeException(), isNull);
     },

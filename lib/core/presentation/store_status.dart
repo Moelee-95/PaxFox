@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/ledger_store.dart';
+import 'busy_label.dart';
 
 /// A committed write is never offered again when only its reload failed.
 class StoreStatus extends StatefulWidget {
@@ -55,7 +56,10 @@ class _StoreStatusState extends State<StoreStatus> {
                       ),
                       TextButton(
                         onPressed: retrying ? null : retry,
-                        child: Text(retrying ? 'Reloading…' : 'Retry'),
+                        child: BusyLabel(
+                          busy: retrying,
+                          label: retrying ? 'Reloading…' : 'Retry',
+                        ),
                       ),
                     ],
                   ),
@@ -67,7 +71,30 @@ class _StoreStatusState extends State<StoreStatus> {
               excluding: stale,
               child: ExcludeSemantics(
                 excluding: stale,
-                child: AbsorbPointer(absorbing: stale, child: child),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    AbsorbPointer(absorbing: stale, child: child),
+                    Positioned(
+                      top: 8,
+                      right: 16,
+                      child: ValueListenableBuilder<bool>(
+                        valueListenable: widget.store.refreshing,
+                        builder: (context, loading, _) => loading
+                            ? const SafeArea(
+                                child: SizedBox.square(
+                                  dimension: 24,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    semanticsLabel: 'Loading data',
+                                  ),
+                                ),
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

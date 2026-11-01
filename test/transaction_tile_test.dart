@@ -15,7 +15,7 @@ void main() {
   setUpAll(() async {
     if (!const bool.fromEnvironment('CAPTURE_UI')) return;
     for (final entry in {
-      'PaxleeRoboto': 'assets/fonts/Roboto-Regular.ttf',
+      'PaxFoxRoboto': 'assets/fonts/Roboto-Regular.ttf',
       'MaterialIcons': 'C:/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
     }.entries) {
       final bytes = await File(entry.value).readAsBytes();

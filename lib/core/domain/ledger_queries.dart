@@ -8,6 +8,18 @@ class LedgerIndex {
     }
   }
 
+  /// Prepare reports before publishing a new snapshot, outside navigation.
+  factory LedgerIndex.prepared(Iterable<LedgerEntry> entries) {
+    final index = LedgerIndex(entries);
+    for (final key in index._months.keys) {
+      final summary = index.forMonth(DateTime(key.$1, key.$2));
+      for (final currency in summary.totalsByCurrency.keys) {
+        summary.rankedCategories(currency);
+      }
+    }
+    return index;
+  }
+
   final List<LedgerEntry> entries;
   final _months = <(int, int), List<LedgerEntry>>{};
   final _summaries = <(int, int), MonthlyLedger>{};

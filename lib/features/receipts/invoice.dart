@@ -48,6 +48,7 @@ class InvoiceItem {
 
 class InvoiceDraft {
   const InvoiceDraft({
+    this.type = EntryType.expense,
     this.merchant = '',
     this.multipleInvoices = false,
     this.date,
@@ -59,6 +60,7 @@ class InvoiceDraft {
     this.items = const [],
     this.raw = '',
   });
+  final EntryType type;
   final String merchant, adjustmentNote, raw;
   final bool multipleInvoices;
   final DateTime? date;
@@ -66,6 +68,7 @@ class InvoiceDraft {
   final int? total, adjustment;
   final List<InvoiceItem> items;
   Map<String, Object?> toMap() => {
+    'entry_type': type.name,
     'merchant': merchant,
     'multiple_invoices': multipleInvoices,
     'date': date == null ? null : dayKey(date!),
@@ -78,6 +81,7 @@ class InvoiceDraft {
     'raw': raw,
   };
   factory InvoiceDraft.fromMap(Map<String, dynamic> row) => InvoiceDraft(
+    type: EntryType.values.byName(row['entry_type'] as String? ?? 'expense'),
     merchant: row['merchant'] as String? ?? '',
     multipleInvoices: row['multiple_invoices'] == true,
     date: row['date'] == null ? null : DateTime.parse(row['date'] as String),
@@ -118,6 +122,7 @@ InvoiceDraft parseInvoice(
   String raw,
   Set<String> categories, {
   Currency currency = Currency.eur,
+  EntryType type = EntryType.expense,
 }) {
   var text = raw
       .trim()
@@ -132,6 +137,7 @@ InvoiceDraft parseInvoice(
   String? category(dynamic value) =>
       value is String && categories.contains(value) ? value : null;
   return InvoiceDraft(
+    type: type,
     merchant: json['merchant'] is String ? json['merchant'] as String : '',
     multipleInvoices: json['multiple_invoices'] == true,
     date: invoiceDate(json['date']),
@@ -141,21 +147,30 @@ InvoiceDraft parseInvoice(
     adjustmentNote: json['adjustment_note'] as String? ?? '',
     category: category(json['category']),
     raw: raw,
-    items: (json['items'] as List).map((value) {
-      final item = Map<String, dynamic>.from(value as Map);
-      return InvoiceItem(
-        description: item['description'] as String? ?? '',
-        quantity: item['quantity'] as String? ?? '',
-        total: extractedMoney(item['line_total'], currency: currency),
-        unitPrice: extractedMoney(item['unit_price'], currency: currency),
-        category: category(item['category']),
-        date:
-            invoiceDate(item['date']) ??
-            (json['multiple_invoices'] == true
-                ? null
-                : invoiceDate(json['date'])),
-      );
-    }).toList(),
+    items: (json['items'] as List)
+        .where(
+          (value) =>
+              type != EntryType.income ||
+              value is Map && value['entry_kind'] == 'income',
+        )
+        .map((value) {
+          final item = Map<String, dynamic>.from(value as Map);
+          return InvoiceItem(
+            description: item['description'] as String? ?? '',
+            quantity: type == EntryType.income
+                ? '1'
+                : item['quantity'] as String? ?? '',
+            total: extractedMoney(item['line_total'], currency: currency),
+            unitPrice: extractedMoney(item['unit_price'], currency: currency),
+            category: category(item['category']),
+            date:
+                invoiceDate(item['date']) ??
+                (json['multiple_invoices'] == true
+                    ? null
+                    : invoiceDate(json['date'])),
+          );
+        })
+        .toList(),
   );
 }
 
@@ -196,7 +211,11 @@ List<InvoiceItem> expandInvoiceItems(List<InvoiceItem> items) {
   return expanded;
 }
 
-String? invoiceItemError(InvoiceItem item, Set<String> categories) {
+String? invoiceItemError(
+  InvoiceItem item,
+  Set<String> categories, {
+  EntryType type = EntryType.expense,
+}) {
   final errors = <String>[];
   if (item.description.trim().isEmpty) {
     errors.add('Enter an item name.');
@@ -204,8 +223,11 @@ String? invoiceItemError(InvoiceItem item, Set<String> categories) {
   if (item.total == null || item.total!.abs() > 9000000000000000) {
     errors.add('Enter a valid price.');
   }
+  if (type == EntryType.income && item.total != null && item.total! <= 0) {
+    errors.add('Income must be a positive received amount.');
+  }
   if (!categories.contains(item.category)) {
-    errors.add('Select an available expense category.');
+    errors.add('Select an available ${type.name} category.');
   }
   return errors.isEmpty ? null : errors.join('\n');
 }
@@ -215,7 +237,9 @@ void validateInvoice(
   Set<String> categories, {
   Currency currency = Currency.eur,
 }) {
-  if (draft.currency != currency.code ||
+  if ((draft.type != EntryType.expense && draft.type != EntryType.income) ||
+      (draft.type == EntryType.income && (draft.adjustment ?? 0) != 0) ||
+      draft.currency != currency.code ||
       ((draft.multipleInvoices || draft.date == null) &&
           draft.items.any((item) => item.date == null)) ||
       (draft.date == null && (draft.adjustment ?? 0) != 0) ||
@@ -230,7 +254,7 @@ void validateInvoice(
   }
   var sum = 0;
   for (final item in draft.items) {
-    final itemError = invoiceItemError(item, categories);
+    final itemError = invoiceItemError(item, categories, type: draft.type);
     if (itemError != null) {
       throw ArgumentError('Item ${draft.items.indexOf(item) + 1}: $itemError');
     }

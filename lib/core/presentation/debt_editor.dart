@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'busy_label.dart';
+
 import '../domain/ledger.dart';
 import 'async_action.dart';
 import 'confirmation_dialog.dart';
@@ -163,7 +165,10 @@ class _DebtEditorState extends State<DebtEditor> {
                       },
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
-                  child: Text(busy ? 'Saving...' : 'Save debt'),
+                  child: BusyLabel(
+                    busy: busy,
+                    label: busy ? 'Saving...' : 'Save debt',
+                  ),
                 ),
               ),
             ),

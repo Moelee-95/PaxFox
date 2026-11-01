@@ -42,6 +42,8 @@ Uint8List prepareInvoiceImage(Uint8List bytes) {
       : compressed;
 }
 
+bool isInvoicePdf(File file) => p.extension(file.path).toLowerCase() == '.pdf';
+
 class InvoiceImagePreparation {
   InvoiceImagePreparation({this.temporaryDirectory});
 
@@ -60,6 +62,12 @@ class InvoiceImagePreparation {
       throw const FormatException('An image is too large (25 MB limit).');
     }
     var bytes = await file.readAsBytes();
+    if (isInvoicePdf(file)) {
+      if (bytes.length < 5 || String.fromCharCodes(bytes.take(5)) != '%PDF-') {
+        throw const FormatException('The file is not a readable PDF.');
+      }
+      return bytes;
+    }
     // Downsample oversized camera photos in the native codec before the Dart
     // JPEG encoder. Decoding full-resolution scans in Dart can take minutes.
     final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
@@ -75,7 +83,8 @@ class InvoiceImagePreparation {
           6000 / math.max(descriptor.width, descriptor.height),
         ),
       );
-      if (scale < 1) {
+      if (scale < 1 ||
+          ['.heic', '.heif'].contains(p.extension(file.path).toLowerCase())) {
         codec = await descriptor.instantiateCodec(
           targetWidth: math.max(1, (descriptor.width * scale).round()),
           targetHeight: math.max(1, (descriptor.height * scale).round()),
@@ -114,7 +123,12 @@ class InvoiceImagePreparation {
       throw error;
     }));
     if (_disposed) throw StateError('Image preparation has been closed.');
-    final file = File(p.join(directory.path, 'page-${_nextPage++}.jpg'));
+    final file = File(
+      p.join(
+        directory.path,
+        'page-${_nextPage++}.${isInvoicePdf(source) ? 'pdf' : 'jpg'}',
+      ),
+    );
     _files.add(file);
     try {
       await file.writeAsBytes(bytes, flush: true);

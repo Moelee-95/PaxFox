@@ -2,11 +2,18 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../../core/presentation/busy_label.dart';
+
 import 'invoice_image_preview.dart';
 
 class InvoiceSourceDetails extends StatefulWidget {
-  const InvoiceSourceDetails({super.key, required this.source});
+  const InvoiceSourceDetails({
+    super.key,
+    required this.source,
+    this.title = 'Scanned invoice',
+  });
   final Future<Map<String, Object?>?> source;
+  final String title;
 
   @override
   State<InvoiceSourceDetails> createState() => _InvoiceSourceDetailsState();
@@ -35,6 +42,12 @@ class _InvoiceSourceDetailsState extends State<InvoiceSourceDetails> {
   Widget build(BuildContext context) => FutureBuilder(
     future: details,
     builder: (context, snapshot) {
+      if (snapshot.connectionState != ConnectionState.done) {
+        return const Padding(
+          padding: EdgeInsets.all(12),
+          child: BusyLabel(busy: true, label: 'Loading source…'),
+        );
+      }
       if (snapshot.hasError) {
         return const Text(
           'Invoice attachments could not be loaded. You can still edit this transaction.',
@@ -43,7 +56,7 @@ class _InvoiceSourceDetailsState extends State<InvoiceSourceDetails> {
       final data = snapshot.data;
       if (data == null) return const SizedBox.shrink();
       return ExpansionTile(
-        title: const Text('Scanned invoice'),
+        title: Text(widget.title),
         children: [
           for (final path in data.paths)
             InvoiceImagePreview.stored(path: path, height: 220),

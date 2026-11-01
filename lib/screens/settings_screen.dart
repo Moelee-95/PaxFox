@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/presentation/busy_label.dart';
+
 import '../core/data/ledger_store.dart';
 import '../core/presentation/async_action.dart';
 import '../core/presentation/info_button.dart';
@@ -90,7 +92,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       Navigator.pop(context);
                     }
                   },
-            child: Text(saving ? 'Saving...' : 'Save settings'),
+            child: BusyLabel(
+              busy: saving,
+              label: saving ? 'Saving...' : 'Save settings',
+            ),
           ),
         ],
       ),

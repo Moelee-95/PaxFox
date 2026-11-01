@@ -16,7 +16,7 @@ import 'package:moneva/core/presentation/account_picker.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
-  Future<void> openMenuItem(WidgetTester tester, String label) async {
+  Future<void> selectMainTab(WidgetTester tester, String label) async {
     if (find.byType(NavigationBar).evaluate().isEmpty) {
       await tester.pageBack();
       await tester.pumpAndSettle();
@@ -24,10 +24,14 @@ void main() {
     await tester.tap(
       find.descendant(
         of: find.byType(NavigationBar),
-        matching: find.text('More'),
+        matching: find.text(label),
       ),
     );
     await tester.pumpAndSettle();
+  }
+
+  Future<void> openMenuItem(WidgetTester tester, String label) async {
+    await selectMainTab(tester, 'More');
     final option = find.widgetWithText(ListTile, label);
     final scrollable = find
         .descendant(
@@ -57,7 +61,7 @@ void main() {
     }
     await tester.tap(find.byTooltip('Add transaction'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Add manually'));
+    await tester.tap(find.byKey(const ValueKey('create-expense-manual')));
     await tester.pumpAndSettle();
   }
 
@@ -262,7 +266,7 @@ void main() {
     expect(find.text('Bread return'), findsNothing);
     expect(find.text('Milk'), findsNothing);
 
-    await openMenuItem(tester, 'Home');
+    await selectMainTab(tester, 'Home');
     await openMenuItem(tester, 'All transactions');
     await tester.pumpAndSettle();
     expect(
@@ -288,33 +292,40 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('More Home restores the pager and Reports is removed', (
-    tester,
-  ) async {
-    await tester.runAsync(prepareAccounts);
-    await tester.pumpWidget(MyApp(store: store));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Overview'));
-    await tester.pumpAndSettle();
-    expect(find.text('Account balances today'), findsOneWidget);
-    expect(find.text('Monthly overview'), findsNothing);
-    expect(find.textContaining('Spending after refunds:'), findsNothing);
-    await tester.tap(
-      find.descendant(
-        of: find.byType(NavigationBar),
-        matching: find.text('More'),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.widgetWithText(ListTile, 'Reports'), findsNothing);
-    await tester.tap(find.widgetWithText(ListTile, 'Home'));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('month-selector')), findsOneWidget);
-    expect(
-      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-      0,
-    );
-  });
+  testWidgets(
+    'Home navigation restores the pager; More omits Home and Reports',
+    (tester) async {
+      await tester.runAsync(prepareAccounts);
+      await tester.pumpWidget(MyApp(store: store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Overview'));
+      await tester.pumpAndSettle();
+      expect(find.text('Account balances today'), findsOneWidget);
+      expect(find.text('Monthly overview'), findsNothing);
+      expect(find.textContaining('Spending after refunds:'), findsNothing);
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('More'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(ListTile, 'Reports'), findsNothing);
+      expect(find.widgetWithText(ListTile, 'Home'), findsNothing);
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('Home'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('month-selector')), findsOneWidget);
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        0,
+      );
+    },
+  );
 
   testWidgets(
     'recurring income form selects income categories and a blocked receiving account',
@@ -477,7 +488,7 @@ void main() {
       expect(find.byType(NavigationDestination), findsNothing);
       expect(find.text('Reports'), findsNothing);
       expect(find.text('Accounts'), findsNothing);
-      await openMenuItem(tester, 'Home');
+      await selectMainTab(tester, 'Home');
       expect(find.byTooltip('Previous month'), findsOneWidget);
       expect(find.byTooltip('Next month'), findsOneWidget);
       await openMenuItem(tester, 'Categories');
@@ -542,10 +553,10 @@ void main() {
         await store.refresh();
       });
       await tester.pumpWidget(MyApp(store: store));
-      await tester.pumpAndSettle();
-      await tester.runAsync(() async {
-        await Future<void>.delayed(const Duration(milliseconds: 150));
-      });
+      await tester.pump();
+      await tester.runAsync(
+        () => waitForStore(store, () => store.entries.length == 1),
+      );
       await tester.pumpAndSettle();
       expect(store.entries, hasLength(1));
       for (var i = 0; i < 2; i++) {
@@ -849,7 +860,7 @@ void main() {
     await tester.runAsync(store.refresh);
     await tester.pumpWidget(MyApp(store: store));
     await tester.pumpAndSettle();
-    expect(find.text('Welcome to Paxlee'), findsNothing);
+    expect(find.text('Welcome to PaxFox'), findsNothing);
     expect(find.text('Home'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

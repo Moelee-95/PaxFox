@@ -12,6 +12,22 @@ import '../domain/recurring.dart';
 import 'ledger_database.dart';
 import 'transaction_csv.dart';
 
+typedef _SnapshotInput = ({
+  List<Map<String, Object?>> rows,
+  List<Account> accounts,
+  DateTime today,
+});
+
+({LedgerIndex ledger, AccountBalances balances}) _prepareLedger(
+  _SnapshotInput input,
+) {
+  final ledger = LedgerIndex.prepared(input.rows.map(LedgerEntry.fromMap));
+  return (
+    ledger: ledger,
+    balances: AccountBalances(input.accounts, ledger.entries, input.today),
+  );
+}
+
 class LedgerStore extends ChangeNotifier {
   LedgerStore(this.db);
   final Database db;
@@ -22,6 +38,8 @@ class LedgerStore extends ChangeNotifier {
   Set<int> _deletableBankIds = const {};
   Set<int> _receiptTransactionIds = const {};
   Set<int> get receiptTransactionIds => _receiptTransactionIds;
+  Set<int> _scannedInvoiceTransactionIds = const {};
+  Set<int> get scannedInvoiceTransactionIds => _scannedInvoiceTransactionIds;
   List<LedgerCategory> _categories = const [];
   List<LedgerCategory> get categories => _categories;
   Map<CategoryKind, List<LedgerCategory>> _categoriesByKind = const {};
@@ -70,6 +88,18 @@ class LedgerStore extends ChangeNotifier {
   String get profileEmail => _profileEmail;
   bool _snapshotNeedsRefresh = false;
   bool get snapshotNeedsRefresh => _snapshotNeedsRefresh;
+  // Separate from snapshot notifications: a spinner must not rebuild pages.
+  final refreshing = ValueNotifier(false);
+  int _refreshes = 0;
+  int _refreshGeneration = 0;
+  bool _disposed = false;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    refreshing.dispose();
+    super.dispose();
+  }
 
   Future<void> _refreshAfterWrite() async {
     try {
@@ -142,6 +172,18 @@ class LedgerStore extends ChangeNotifier {
   }
 
   Future<void> refresh() async {
+    final generation = ++_refreshGeneration;
+    _refreshes++;
+    if (!_disposed) refreshing.value = true;
+    try {
+      await _readSnapshot(generation);
+    } finally {
+      _refreshes--;
+      if (!_disposed) refreshing.value = _refreshes > 0;
+    }
+  }
+
+  Future<void> _readSnapshot(int generation) async {
     final snapshot = await db.transaction((txn) async {
       final settingRows = await txn.query('settings');
       final settingsByKey = {
@@ -166,6 +208,10 @@ class LedgerStore extends ChangeNotifier {
           : 180;
       final receiptIds = (await txn.query(
         'receipts',
+        columns: ['transaction_id'],
+      )).map((r) => r['transaction_id'] as int).toSet();
+      final scannedIds = (await txn.query(
+        'scanned_invoice_entries',
         columns: ['transaction_id'],
       )).map((r) => r['transaction_id'] as int).toSet();
       final rules = (await txn.query(
@@ -197,12 +243,12 @@ class LedgerStore extends ChangeNotifier {
             whereArgs: [activeCurrency.name],
             limit: 1,
           )).isNotEmpty;
-      final entryList = (await txn.query(
+      final entryList = await txn.query(
         'transactions',
         where: 'currency = ?',
         whereArgs: [activeCurrency.name],
         orderBy: 'date DESC, id DESC',
-      )).map(LedgerEntry.fromMap).toList();
+      );
       final accountList = (await txn.query(
         'accounts',
         where: 'currency = ?',
@@ -223,6 +269,7 @@ class LedgerStore extends ChangeNotifier {
         debts: debtList,
         timeout: timeout,
         receiptIds: receiptIds,
+        scannedIds: scannedIds,
         rules: rules,
         occurrences: occurrences,
         setup: setup,
@@ -232,12 +279,25 @@ class LedgerStore extends ChangeNotifier {
         accounts: accountList,
       );
     });
+    // Decode transactions, index months and prepare reports away from the UI
+    // for large ledgers. Small snapshots avoid isolate startup overhead.
+    final today = dateOnly(DateTime.now());
+    final input = (
+      rows: snapshot.entries,
+      accounts: snapshot.accounts,
+      today: today,
+    );
+    final prepared = snapshot.entries.length >= 1000
+        ? await compute(_prepareLedger, input)
+        : _prepareLedger(input);
+    if (_disposed || generation != _refreshGeneration) return;
     _currency = snapshot.currency;
     _profileName = snapshot.profileName;
     _profileEmail = snapshot.profileEmail;
     _debts = List.unmodifiable(snapshot.debts);
     invoiceTimeoutSeconds = snapshot.timeout;
     _receiptTransactionIds = Set.unmodifiable(snapshot.receiptIds);
+    _scannedInvoiceTransactionIds = Set.unmodifiable(snapshot.scannedIds);
     _recurringRules = List.unmodifiable(snapshot.rules);
     _recurringOccurrences = List.unmodifiable(snapshot.occurrences);
     setupCompleted = snapshot.setup;
@@ -251,10 +311,11 @@ class LedgerStore extends ChangeNotifier {
         (category.kind, category.name): category,
     };
     hasLegacyCurrencyData = snapshot.legacy;
-    _ledger = LedgerIndex(snapshot.entries);
+    _ledger = prepared.ledger;
     _accounts = List.unmodifiable(snapshot.accounts);
     _deletableBankIds = Set.unmodifiable(snapshot.deletableBankIds);
-    _balances = null;
+    _balances = prepared.balances;
+    _balanceDate = today;
     _snapshotNeedsRefresh = false;
     notifyListeners();
   }
@@ -1271,7 +1332,7 @@ class LedgerStore extends ChangeNotifier {
   }) async {
     validateInvoice(
       draft,
-      categoriesFor(EntryType.expense).map((c) => c.name).toSet(),
+      categoriesFor(draft.type).map((c) => c.name).toSet(),
       currency: currency,
     );
     await db.transaction((txn) async {
@@ -1282,7 +1343,9 @@ class LedgerStore extends ChangeNotifier {
         'created_at': DateTime.now().toUtc().toIso8601String(),
       });
       final lines = [
-        ...expandInvoiceItems(draft.items),
+        ...(draft.type == EntryType.income
+            ? draft.items
+            : expandInvoiceItems(draft.items)),
         if ((draft.adjustment ?? 0) != 0)
           InvoiceItem(
             description: draft.adjustmentNote,
@@ -1306,14 +1369,19 @@ class LedgerStore extends ChangeNotifier {
         final id = await _writeEntry(
           txn,
           LedgerEntry(
-            type: item.total! < 0 ? EntryType.refund : EntryType.expense,
+            type: draft.type == EntryType.income
+                ? EntryType.income
+                : item.total! < 0
+                ? EntryType.refund
+                : EntryType.expense,
             amount: item.total!.abs(),
             currency: currency,
             date: item.date ?? draft.date!,
             description: item.description.trim(),
             category: item.category!,
             accountId: accountId,
-            notes: 'Merchant: ${draft.merchant}',
+            notes:
+                '${draft.type == EntryType.income ? 'Payer' : 'Merchant'}: ${draft.merchant}',
           ),
           checkFunds: false,
         );
@@ -1346,6 +1414,9 @@ class LedgerStore extends ChangeNotifier {
   }) async {
     if (draft.date == null || draft.multipleInvoices) {
       throw ArgumentError('Legacy invoice expenses require one invoice date.');
+    }
+    if (draft.type != EntryType.expense) {
+      throw ArgumentError('Legacy invoice editing supports expenses only.');
     }
     validateInvoice(
       draft,
