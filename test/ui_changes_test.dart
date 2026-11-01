@@ -2,12 +2,17 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+
+import 'helpers/wait_for_store.dart';
+
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moneva/core/data/ledger_store.dart';
 import 'package:moneva/core/domain/ledger.dart';
 import 'package:moneva/core/presentation/account_picker.dart';
+import 'package:moneva/core/presentation/app_theme.dart';
+import 'package:moneva/screens/csv_screen.dart';
 import 'package:moneva/features/receipts/invoice.dart';
 import 'package:moneva/features/receipts/invoice_review_screen.dart';
 import 'package:moneva/main.dart';
@@ -18,10 +23,8 @@ void main() {
   final previewKey = GlobalKey();
   setUpAll(() async {
     if (!const bool.fromEnvironment('CAPTURE_UI')) return;
-    final bytes = await File(
-      '${Platform.environment['WINDIR'] ?? 'C:/Windows'}/Fonts/arial.ttf',
-    ).readAsBytes();
-    for (final family in ['Roboto', 'Ahem']) {
+    final bytes = await File('assets/fonts/Roboto-Regular.ttf').readAsBytes();
+    for (final family in ['PaxleeRoboto', 'Roboto', 'Ahem']) {
       await (FontLoader(
         family,
       )..addFont(Future.value(ByteData.sublistView(bytes)))).load();
@@ -68,6 +71,51 @@ void main() {
     });
   }
 
+  testWidgets('CSV multi-select layout in light, dark and large text', (
+    tester,
+  ) async {
+    phone(tester);
+    await tester.runAsync(
+      () => store.completeSetup([
+        Account(
+          name: 'Cash',
+          currency: Currency.eur,
+          opening: 1000,
+          asOf: DateTime(2026),
+          kind: AccountKind.cash,
+        ),
+        Account(
+          name: 'Household bank account',
+          currency: Currency.eur,
+          opening: 10000,
+          asOf: DateTime(2026),
+        ),
+      ]),
+    );
+    Widget app(Brightness brightness, {double scale = 1}) => RepaintBoundary(
+      key: previewKey,
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: brightness == Brightness.dark ? AppTheme.dark : AppTheme.light,
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: TextScaler.linear(scale)),
+          child: child!,
+        ),
+        home: CsvScreen(store: store),
+      ),
+    );
+    await tester.pumpWidget(app(Brightness.light));
+    await preview(tester, 'csv-multi-light');
+    expect(find.byType(DropdownButtonFormField<int>), findsNothing);
+    await tester.pumpWidget(app(Brightness.dark));
+    await preview(tester, 'csv-multi-dark');
+    tester.view.physicalSize = const Size(320, 740);
+    await tester.pumpWidget(app(Brightness.light, scale: 1.8));
+    await preview(tester, 'csv-multi-large-text');
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'first-run currency and debt appear in accounts and wealth, with outlined inputs',
     (tester) async {
@@ -110,7 +158,7 @@ void main() {
       await tester.ensureVisible(find.text('Finish setup'));
       await tester.tap(find.text('Finish setup'));
       await tester.runAsync(() async {
-        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await waitForStore(store, () => store.setupCompleted);
       });
       await tester.pumpAndSettle();
       expect(store.currency, Currency.iqd);
@@ -120,6 +168,19 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Account wealth'), findsOneWidget);
       await preview(tester, 'overview-debt');
+      tester.binding.platformDispatcher.platformBrightnessTestValue =
+          Brightness.dark;
+      addTearDown(
+        tester.binding.platformDispatcher.clearPlatformBrightnessTestValue,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        Theme.of(tester.element(find.text('Account wealth'))).brightness,
+        Brightness.dark,
+      );
+      await preview(tester, 'overview-dark');
+      tester.binding.platformDispatcher.clearPlatformBrightnessTestValue();
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Home'));
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Monthly overview'));
@@ -127,13 +188,27 @@ void main() {
       await preview(tester, 'home-monthly-overview');
       await tester.tap(find.text('Overview'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Open menu'));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('More'),
+        ),
+      );
       await tester.pumpAndSettle();
+      await preview(tester, 'more-profile');
+      await tester.ensureVisible(find.widgetWithText(ListTile, 'Accounts'));
       await tester.tap(find.widgetWithText(ListTile, 'Accounts'));
       await tester.pumpAndSettle();
       expect(find.text('Family loan'), findsOneWidget);
       await preview(tester, 'accounts-management');
       await tester.pageBack();
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('Home'),
+        ),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Add transaction'));
       await tester.pumpAndSettle();
@@ -149,8 +224,16 @@ void main() {
       await preview(tester, 'manual-inputs');
       await tester.pageBack();
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Open menu'));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('More'),
+        ),
+      );
       await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.widgetWithText(ListTile, 'Recurring payments'),
+      );
       await tester.tap(find.widgetWithText(ListTile, 'Recurring payments'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Add recurring payment'));
@@ -248,7 +331,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Save transactions'));
       await tester.runAsync(() async {
-        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await waitForStore(store, () => store.entries.length == 2);
       });
       await tester.pumpAndSettle();
       expect(

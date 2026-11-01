@@ -52,7 +52,7 @@ void main() {
       );
       await tester.pumpWidget(MyApp(store: store));
       await tester.pumpAndSettle();
-      for (final destination in ['Home', 'Overview', 'Cashflow']) {
+      for (final destination in ['Home', 'Overview', 'Cashflow', 'More']) {
         await tester.tap(find.text(destination));
         await tester.pumpAndSettle();
         final before = exits;

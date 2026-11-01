@@ -250,7 +250,7 @@ void main() {
       final created = store.entries.single.createdAt!;
       await tester.pumpWidget(MyApp(store: store));
       await tester.pumpAndSettle();
-      expect(find.textContaining('Added '), findsOneWidget);
+      expect(find.textContaining('Added on '), findsOneWidget);
       await tester.runAsync(
         () =>
             store.db.update('transactions', {'description': 'Refreshed name'}),

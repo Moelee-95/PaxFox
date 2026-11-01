@@ -1,21 +1,17 @@
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-
-import '../core/presentation/grouped_amount_formatter.dart';
-
-import '../core/presentation/entry_type_picker.dart';
 
 import '../core/data/ledger_store.dart';
 import '../core/domain/category.dart';
 import '../core/domain/ledger.dart';
 import '../core/presentation/account_picker.dart';
+import '../core/presentation/async_action.dart';
 import '../core/presentation/bottom_action_bar.dart';
 import '../core/presentation/category_icons.dart';
 import '../core/presentation/confirmation_dialog.dart';
+import '../core/presentation/entry_type_picker.dart';
+import '../core/presentation/grouped_amount_formatter.dart';
 import '../core/presentation/transaction_tile.dart';
-import '../features/receipts/invoice_images.dart';
+import '../features/receipts/invoice_source_details.dart';
 
 class TransactionForm extends StatefulWidget {
   const TransactionForm({super.key, required this.store, this.entry});
@@ -33,8 +29,9 @@ class _TransactionFormState extends State<TransactionForm> {
   late Currency currency;
   late DateTime date;
   int? accountId, destinationId;
-  bool saving = false;
-  String? error;
+  late final action = AsyncAction()..addListener(() => setState(() {}));
+  bool get saving => action.busy;
+  String? get error => action.error;
   Future<Map<String, Object?>?>? scannedInvoice;
   bool get originallyUnassigned =>
       widget.entry?.id != null && widget.entry?.accountId == null;
@@ -63,6 +60,7 @@ class _TransactionFormState extends State<TransactionForm> {
     for (final c in [amount, description, notes]) {
       c.dispose();
     }
+    action.dispose();
     super.dispose();
   }
 
@@ -70,12 +68,8 @@ class _TransactionFormState extends State<TransactionForm> {
     if (!form.currentState!.validate()) {
       return;
     }
-    setState(() {
-      saving = true;
-      error = null;
-    });
-    try {
-      await widget.store.saveEntry(
+    final saved = await action.run(
+      () async => widget.store.saveEntry(
         LedgerEntry(
           id: widget.entry?.id,
           type: type,
@@ -88,25 +82,10 @@ class _TransactionFormState extends State<TransactionForm> {
           accountId: accountId,
           destinationId: type == EntryType.transfer ? destinationId : null,
         ),
-      );
-      if (mounted) {
-        Navigator.pop(context, true);
-      }
-    } on ArgumentError catch (e) {
-      if (mounted) {
-        setState(() {
-          saving = false;
-          error = '${e.message}';
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          saving = false;
-          error = 'Could not save. Check the fields and account currencies, then retry.';
-        });
-      }
-    }
+      ),
+      failureMessage: 'Could not save. Check the fields and account currencies, then retry.',
+    );
+    if (saved && mounted) Navigator.pop(context, true);
   }
 
   Future<void> delete() async {
@@ -118,27 +97,11 @@ class _TransactionFormState extends State<TransactionForm> {
     if (confirmed != true || !mounted) {
       return;
     }
-    setState(() => saving = true);
-    try {
-      await widget.store.deleteEntry(widget.entry!.id!);
-      if (mounted) {
-        Navigator.pop(context);
-      }
-    } on ArgumentError catch (e) {
-      if (mounted) {
-        setState(() {
-          saving = false;
-          error = '${e.message}';
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          saving = false;
-          error = 'Could not delete. Please retry.';
-        });
-      }
-    }
+    final deleted = await action.run(
+      () => widget.store.deleteEntry(widget.entry!.id!),
+      failureMessage: 'Could not delete. Please retry.',
+    );
+    if (deleted && mounted) Navigator.pop(context);
   }
 
   Widget accountField(bool destination) => AccountPicker(
@@ -217,43 +180,7 @@ class _TransactionFormState extends State<TransactionForm> {
             ),
             children: [
               if (scannedInvoice != null)
-                FutureBuilder<Map<String, Object?>?>(
-                  future: scannedInvoice,
-                  builder: (context, snapshot) {
-                    final data = snapshot.data;
-                    if (data == null) {
-                      return const SizedBox.shrink();
-                    }
-                    final paths = (jsonDecode(
-                      data['image_paths'] as String,
-                    ) as List).cast<String>();
-                    return ExpansionTile(
-                      title: const Text('Scanned invoice'),
-                      children: [
-                        for (final path in paths)
-                          FutureBuilder<File>(
-                            future: InvoiceImages().resolve(path),
-                            builder: (_, image) => image.hasData
-                                ? SizedBox(
-                                    height: 220,
-                                    child: Image.file(
-                                      image.data!,
-                                      errorBuilder: (_, _, _) =>
-                                          const Text('Image unavailable'),
-                                    ),
-                                  )
-                                : const SizedBox(height: 20),
-                          ),
-                        ExpansionTile(
-                          title: const Text('Original extracted data'),
-                          children: [
-                            SelectableText(data['raw_response'] as String),
-                          ],
-                        ),
-                      ],
-                    );
-                  },
-                ),
+                InvoiceSourceDetails(source: scannedInvoice!),
               if (widget.entry?.createdAt != null)
                 Text(
                   'Added ${creationTimestamp(context, widget.entry!.createdAt!)}',
@@ -344,7 +271,10 @@ class _TransactionFormState extends State<TransactionForm> {
                           value: c.name,
                           child: Row(
                             children: [
-                              Icon(categoryIconData(c.icon)),
+                              categoryGlyph(
+                                categoryIconData(c.icon),
+                                color: c.color == null ? null : Color(c.color!),
+                              ),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Text(

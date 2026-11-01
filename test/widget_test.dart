@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import 'helpers/wait_for_store.dart';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moneva/main.dart';
 import 'package:moneva/core/data/ledger_store.dart';
@@ -7,18 +10,51 @@ import 'package:moneva/screens/cashflow_screen.dart';
 import 'package:moneva/core/domain/recurring.dart';
 import 'package:moneva/core/domain/category.dart';
 import 'package:moneva/core/presentation/category_icons.dart';
+import 'package:moneva/core/presentation/transaction_tile.dart';
+import 'package:moneva/screens/more_screen.dart';
 import 'package:moneva/core/presentation/account_picker.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
   Future<void> openMenuItem(WidgetTester tester, String label) async {
-    await tester.tap(find.byTooltip('Open menu'));
+    if (find.byType(NavigationBar).evaluate().isEmpty) {
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+    }
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('More'),
+      ),
+    );
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(ListTile, label));
+    final option = find.widgetWithText(ListTile, label);
+    final scrollable = find
+        .descendant(
+          of: find.byType(MoreScreen),
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    tester.state<ScrollableState>(scrollable).position.jumpTo(0);
+    await tester.pump();
+    await tester.scrollUntilVisible(option, 200, scrollable: scrollable);
+    await tester.tap(option);
     await tester.pumpAndSettle();
   }
 
   Future<void> openManualTransaction(WidgetTester tester) async {
+    if (tester
+            .widget<NavigationBar>(find.byType(NavigationBar))
+            .selectedIndex ==
+        3) {
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('Home'),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
     await tester.tap(find.byTooltip('Add transaction'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Add manually'));
@@ -252,7 +288,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('drawer Home restores the pager and Reports is removed', (
+  testWidgets('More Home restores the pager and Reports is removed', (
     tester,
   ) async {
     await tester.runAsync(prepareAccounts);
@@ -263,7 +299,12 @@ void main() {
     expect(find.text('Account balances today'), findsOneWidget);
     expect(find.text('Monthly overview'), findsNothing);
     expect(find.textContaining('Spending after refunds:'), findsNothing);
-    await tester.tap(find.byTooltip('Open menu'));
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('More'),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(find.widgetWithText(ListTile, 'Reports'), findsNothing);
     await tester.tap(find.widgetWithText(ListTile, 'Home'));
@@ -350,7 +391,7 @@ void main() {
   );
 
   testWidgets(
-    'drawer contains reports and management; transaction icons use category and type colors',
+    'More contains management; transaction icons use category and type colors',
     (tester) async {
       tester.view.physicalSize = const Size(1000, 1800);
       tester.view.devicePixelRatio = 1;
@@ -397,15 +438,35 @@ void main() {
       await openMenuItem(tester, 'All transactions');
       await tester.pumpAndSettle();
       for (final type in EntryType.values) {
-        final tile = tester.widget<ListTile>(
-          find.widgetWithText(ListTile, 'Icon ${type.name}'),
+        final row = find.widgetWithText(TransactionTile, 'Icon ${type.name}');
+        final icon = tester.widget<Icon>(
+          find
+              .descendant(
+                of: find.descendant(
+                  of: row,
+                  matching: find.byKey(
+                    const ValueKey('transaction-category-badge'),
+                  ),
+                ),
+                matching: find.byType(Icon),
+              )
+              .first,
         );
-        final icon = tile.leading! as Icon;
-        expect(icon.color, transactionColor(type));
+        final price = tester.widget<Text>(
+          find.descendant(
+            of: row,
+            matching: find.byKey(const ValueKey('transaction-price')),
+          ),
+        );
+        expect(price.style!.color, switch (type) {
+          EntryType.expense => Colors.red.shade700,
+          EntryType.income || EntryType.refund => Colors.green.shade700,
+          EntryType.transfer => Colors.blue.shade700,
+        });
         expect(
           icon.icon,
           type == EntryType.transfer
-              ? Icons.account_balance_outlined
+              ? Icons.swap_horiz
               : categoryIconData(
                   type == EntryType.income
                       ? CategoryIcon.salary
@@ -422,8 +483,9 @@ void main() {
       await openMenuItem(tester, 'Categories');
       await tester.tap(find.byTooltip('Edit Groceries'));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(TextFormField, 'Category icon'));
-      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.widgetWithText(TextField, 'Search icons'),
+      );
       await tester.enterText(
         find.widgetWithText(TextField, 'Search icons'),
         'home',
@@ -438,11 +500,18 @@ void main() {
       await tester.pumpAndSettle();
       await tester.pageBack();
       await tester.pumpAndSettle();
-      final changed = tester.widget<ListTile>(
-        find.widgetWithText(ListTile, 'Icon expense'),
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('Home'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final changed = tester.widget<TransactionTile>(
+        find.widgetWithText(TransactionTile, 'Icon expense'),
       );
       expect(
-        (changed.leading! as Icon).icon,
+        categoryIconData(changed.categoryIcon),
         categoryIconData(CategoryIcon.home),
       );
       expect(tester.takeException(), isNull);
@@ -780,7 +849,7 @@ void main() {
     await tester.runAsync(store.refresh);
     await tester.pumpWidget(MyApp(store: store));
     await tester.pumpAndSettle();
-    expect(find.text('Welcome to Moneva'), findsNothing);
+    expect(find.text('Welcome to Paxlee'), findsNothing);
     expect(find.text('Home'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -806,7 +875,10 @@ void main() {
       );
       await tester.tap(find.text('Save category'));
       await tester.runAsync(() async {
-        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await waitForStore(
+          store,
+          () => store.categories.any((category) => category.name == 'Pet care'),
+        );
       });
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
@@ -822,7 +894,10 @@ void main() {
       );
       await tester.tap(find.text('Save category'));
       await tester.runAsync(() async {
-        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await waitForStore(
+          store,
+          () => store.categories.any((category) => category.name == 'Pets'),
+        );
       });
       await tester.pumpAndSettle();
       expect(find.text('Pets'), findsOneWidget);

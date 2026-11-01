@@ -46,6 +46,9 @@ void main() {
   stdout.writeln(
     'Synthetic ledger: ${accounts.length} accounts, ${entries.length} entries',
   );
+  stdout.writeln(
+    'Snapshot index construction: ${medianMicroseconds(() => LedgerIndex(entries).entries.length) / 1000} ms',
+  );
   final individualTime = medianMicroseconds(individualBalances);
   final batchTime = medianMicroseconds(batchBalances);
   stdout.writeln('Per-account scans: ${individualTime / 1000} ms');
@@ -76,6 +79,43 @@ void main() {
   stdout.writeln('100 cached month lookups: ${cachedTime / 1000} ms');
   stdout.writeln(
     'Index construction and first monthly lookup are excluded from cached timing.',
+  );
+
+  final summary = index.forMonth(month);
+  const category = 'Category 0';
+  int scanCategory() => summary.spendingEntries
+      .where(
+        (entry) => entry.currency == Currency.eur && entry.category == category,
+      )
+      .length;
+  int indexedCategory() =>
+      summary.spendingForCategory(Currency.eur, category).length;
+  if (scanCategory() != indexedCategory()) {
+    throw StateError('Category results disagree.');
+  }
+  stdout.writeln(
+    '1000 category scans: ${medianMicroseconds(scanCategory, repetitions: 1000) / 1000} ms',
+  );
+  stdout.writeln(
+    '1000 indexed category lookups: ${medianMicroseconds(indexedCategory, repetitions: 1000) / 1000} ms',
+  );
+
+  int alternateTypeFilters() {
+    var count = 0;
+    for (final type in EntryType.values) {
+      count += index.search(type: type).length;
+    }
+    return count;
+  }
+
+  if (alternateTypeFilters() != entries.length) {
+    throw StateError('Type filters disagree with the ledger.');
+  }
+  stdout.writeln(
+    '100 alternating type-filter cycles: ${medianMicroseconds(alternateTypeFilters, repetitions: 100) / 1000} ms',
+  );
+  stdout.writeln(
+    'First text search: ${medianMicroseconds(() => LedgerIndex(entries).search(query: "transaction 10").length) / 1000} ms (includes index construction)',
   );
 }
 

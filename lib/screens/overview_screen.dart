@@ -60,99 +60,136 @@ class OverviewScreen extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => ListView(
-    physics: const AlwaysScrollableScrollPhysics(),
-    padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
-    children: [
-      _accountOverview(context),
-      if (recurringError != null)
-        Padding(
-          padding: const EdgeInsets.only(top: 12),
-          child: Text(recurringError!),
-        ),
-      const SizedBox(height: 20),
-      if (store.recurringOccurrences.any((o) => o.status == 'failed'))
-        TextButton(
-          onPressed: onOpenRecurring,
-          child: const Text('Review unpaid recurring payments'),
-        ),
-      Text(
-        'Account balances today',
-        style: Theme.of(context).textTheme.titleLarge,
-      ),
-      if (store.accounts.isEmpty)
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: 12),
-          child: Text(
-            'No accounts configured. Add an opening balance to track available cash.',
-          ),
-        ),
-      for (final account in store.accounts)
-        AccountBalanceCard(
-          account: account,
-          balance:
-              store.currentBalances.byAccount[account.id] ?? account.opening,
-          onEdit: () => Navigator.push(
-            context,
-            MaterialPageRoute<void>(
-              builder: (_) => AccountForm(store: store, account: account),
-            ),
-          ),
-        ),
-      const SizedBox(height: 24),
-      Text(
-        'Debts',
-        style: Theme.of(context).textTheme.titleLarge
-            ?.copyWith(color: Theme.of(context).colorScheme.error),
-      ),
-      const SizedBox(height: 8),
-      if (store.debts.isEmpty) const Text('No outstanding debts.'),
-      for (final debt in store.debts)
-        Card(
-          color: Theme.of(context).colorScheme.errorContainer,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final accounts = store.accounts;
+    final debts = store.debts;
+    final balances = store.currentBalances.byAccount;
+    return CustomScrollView(
+      key: const PageStorageKey('account-overview'),
+      physics: const AlwaysScrollableScrollPhysics(),
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          sliver: SliverToBoxAdapter(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.account_balance_outlined,
-                      color: Theme.of(context).colorScheme.onErrorContainer,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        debt.name,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onErrorContainer,
-                            ),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Edit debt ${debt.name}',
-                      visualDensity: VisualDensity.compact,
-                      onPressed: () => _editDebt(context, debt),
-                      icon: const Icon(Icons.edit_outlined),
-                    ),
-                  ],
-                ),
-                Text(
-                  store.currency.display(debt.amount),
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onErrorContainer,
+                _accountOverview(context),
+                if (recurringError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text(recurringError!),
                   ),
+                const SizedBox(height: 20),
+                if (store.recurringOccurrences.any((o) => o.status == 'failed'))
+                  TextButton(
+                    onPressed: onOpenRecurring,
+                    child: const Text('Review unpaid recurring payments'),
+                  ),
+                Text(
+                  'Account balances today',
+                  style: theme.textTheme.titleLarge,
                 ),
+                if (accounts.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Text(
+                      'No accounts configured. Add an opening balance to track available cash.',
+                    ),
+                  ),
               ],
             ),
           ),
         ),
-    ],
-  );
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          sliver: SliverList.builder(
+            itemCount: accounts.length,
+            itemBuilder: (context, index) {
+              final account = accounts[index];
+              return AccountBalanceCard(
+                account: account,
+                balance: balances[account.id] ?? account.opening,
+                onEdit: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => AccountForm(store: store, account: account),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+          sliver: SliverToBoxAdapter(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Debts',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    color: theme.colorScheme.error,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                if (debts.isEmpty) const Text('No outstanding debts.'),
+              ],
+            ),
+          ),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          sliver: SliverList.builder(
+            itemCount: debts.length,
+            itemBuilder: (context, index) => _debtCard(context, debts[index]),
+          ),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 88)),
+      ],
+    );
+  }
+
+  Widget _debtCard(BuildContext context, Debt debt) {
+    final theme = Theme.of(context);
+    final foreground = theme.colorScheme.onErrorContainer;
+    return Card(
+      color: theme.colorScheme.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.account_balance_outlined, color: foreground),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    debt.name,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: foreground,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Edit debt ${debt.name}',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => _editDebt(context, debt),
+                  icon: const Icon(Icons.edit_outlined),
+                ),
+              ],
+            ),
+            Text(
+              store.currency.display(debt.amount),
+              style: theme.textTheme.headlineSmall?.copyWith(color: foreground),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Future<void> _editDebt(BuildContext context, Debt debt) => showDialog<void>(
     context: context,

@@ -65,7 +65,7 @@ void main() {
       await tester.tap(find.text('Groceries'));
       await tester.pumpAndSettle();
       expect(find.byType(NavigationBar), findsOneWidget);
-      expect(find.text('Spending by category'), findsOneWidget);
+      expect(find.byTooltip('Back to categories'), findsOneWidget);
       expect(find.text('Bread'), findsOneWidget);
       expect(find.text('Shoes'), findsNothing);
       await tester.tap(find.text('Bread'));
@@ -96,6 +96,53 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('system Back returns from category spending to categories', (
+    tester,
+  ) async {
+    await tester.runAsync(
+      () => store.saveEntry(
+        LedgerEntry(
+          type: EntryType.expense,
+          amount: 100,
+          currency: Currency.eur,
+          date: dateOnly(DateTime.now()),
+          description: 'Bread',
+          category: 'Groceries',
+          accountId: store.accounts.single.id,
+        ),
+      ),
+    );
+    await tester.pumpWidget(MyApp(store: store));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Monthly overview'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Groceries'));
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Bread'));
+    await tester.pumpAndSettle();
+
+    // Selection closes first, then Back navigates out of the category.
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Cancel selection'), findsNothing);
+    expect(find.byTooltip('Back to categories'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Back to categories'), findsNothing);
+    expect(find.text('Groceries'), findsOneWidget);
+    expect(find.text('Bread'), findsNothing);
+    expect(find.text('Tap back again to exit'), findsNothing);
+
+    await tester.tap(find.text('Groceries'));
+    await tester.pumpAndSettle();
+    expect(find.text('Bread'), findsOneWidget);
+    await tester.tap(find.byTooltip('Back to categories'));
+    await tester.pumpAndSettle();
+    expect(find.text('Groceries'), findsOneWidget);
+    expect(find.text('Bread'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'overview cards grow for long labels, expose account edit and highlight debts',

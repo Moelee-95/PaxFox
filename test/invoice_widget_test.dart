@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import 'helpers/wait_for_store.dart';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moneva/core/data/ledger_store.dart';
 import 'package:moneva/core/domain/ledger.dart';
@@ -64,12 +67,7 @@ void main() {
         find.text('Confirm that the original invoice is in EUR.'),
         findsOneWidget,
       );
-      expect(
-        find.text(
-          'Choose the date for this item.',
-        ),
-        findsOneWidget,
-      );
+      expect(find.text('Choose the date for this item.'), findsOneWidget);
       expect(
         find.text('Choose the cash or bank account used to pay this invoice.'),
         findsOneWidget,
@@ -86,12 +84,7 @@ void main() {
         find.text('Confirm that the original invoice is in EUR.'),
         findsNothing,
       );
-      expect(
-        find.text(
-          'Choose the date for this item.',
-        ),
-        findsOneWidget,
-      );
+      expect(find.text('Choose the date for this item.'), findsOneWidget);
       expect(store.entries, isEmpty);
       expect(tester.takeException(), isNull);
     },
@@ -231,7 +224,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Save transactions'));
       await tester.runAsync(() async {
-        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await waitForStore(store, () => store.entries.length == 1);
       });
       await tester.pumpAndSettle();
       expect(store.entries, hasLength(1));

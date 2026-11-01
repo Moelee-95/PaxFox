@@ -6,11 +6,13 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/data/ledger_store.dart';
+import '../../core/domain/app_failure.dart';
 import '../../core/domain/ledger.dart';
 import '../../core/presentation/info_button.dart';
 import 'gemini_invoice_extractor.dart';
 import 'invoice.dart';
 import 'invoice_image_preparation.dart';
+import 'invoice_image_preview.dart';
 import 'invoice_review_screen.dart';
 
 class InvoiceScanScreen extends StatefulWidget {
@@ -51,6 +53,9 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
   int elapsedSeconds = 0;
   int limitSeconds = 0;
   String stage = 'Preparing images';
+  final progress = ValueNotifier<String>('');
+  void updateProgress() => progress.value =
+      '$stage\nElapsed: ${elapsedSeconds}s - Timeout: ${limitSeconds}s';
   void cancelExtraction({String? message}) {
     requestId++;
     extractionTimer?.cancel();
@@ -79,6 +84,7 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
       extractor.cancel();
     }
     unawaited(_imagePreparation.dispose());
+    progress.dispose();
     super.dispose();
   }
 
@@ -203,6 +209,7 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
     limitSeconds = timeout.inSeconds;
     elapsedSeconds = 0;
     stage = 'Preparing images';
+    updateProgress();
     activeExtractor =
         widget.extractor ??
         GeminiInvoiceExtractor(
@@ -210,13 +217,15 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
           currency: widget.store.currency,
           onProgress: (value) {
             if (mounted && requestId == currentRequest) {
-              setState(() => stage = value);
+              stage = value;
+              updateProgress();
             }
           },
         );
     elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && requestId == currentRequest) {
-        setState(() => elapsedSeconds++);
+        elapsedSeconds++;
+        updateProgress();
       }
     });
     extractionTimer = Timer(timeout, () {
@@ -248,7 +257,10 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
     } catch (e) {
       if (mounted && requestId == currentRequest) {
         setState(
-          () => error = e is InvoiceExtractionException ? e.message : 'Extraction failed. Check your connection and Gemini configuration, then retry.',
+          () => error = AppFailure.messageFor(
+            e,
+            fallback: 'Extraction failed. Your images are still available. Please retry.',
+          ),
         );
       }
     } finally {
@@ -295,8 +307,9 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
             if (busy && activeExtractor != null)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Text(
-                  '$stage\nElapsed: ${elapsedSeconds}s - Timeout: ${limitSeconds}s',
+                child: ValueListenableBuilder<String>(
+                  valueListenable: progress,
+                  builder: (_, value, _) => Text(value),
                 ),
               ),
             if (error != null)
@@ -336,14 +349,7 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
             Card(
               child: Column(
                 children: [
-                  SizedBox(
-                    height: 220,
-                    child: Image.file(
-                      images[i],
-                      errorBuilder: (_, _, _) =>
-                          const Center(child: Text('Image unavailable')),
-                    ),
-                  ),
+                  InvoiceImagePreview(file: images[i], height: 220),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [

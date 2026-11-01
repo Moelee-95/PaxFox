@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-import 'grouped_amount_formatter.dart';
-
 import '../domain/ledger.dart';
+import 'async_action.dart';
 import 'confirmation_dialog.dart';
+import 'grouped_amount_formatter.dart';
 import 'info_button.dart';
 
 class DebtEditor extends StatefulWidget {
@@ -31,34 +31,24 @@ class _DebtEditorState extends State<DebtEditor> {
         ? ''
         : widget.currency.formatGrouped(widget.debt!.amount),
   );
-  bool busy = false;
-  String? error;
+  late final action = AsyncAction()..addListener(() => setState(() {}));
+  bool get busy => action.busy;
+  String? get error => action.error;
 
   @override
   void dispose() {
     name.dispose();
     amount.dispose();
+    action.dispose();
     super.dispose();
   }
 
-  Future<void> run(Future<void> Function() action) async {
-    setState(() {
-      busy = true;
-      error = null;
-    });
-    try {
-      await action();
-      if (mounted) {
-        Navigator.pop(context);
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          busy = false;
-          error = 'Could not save the debt. Please retry.';
-        });
-      }
-    }
+  Future<void> run(Future<void> Function() operation) async {
+    final saved = await action.run(
+      operation,
+      failureMessage: 'Could not save the debt. Please retry.',
+    );
+    if (saved && mounted) Navigator.pop(context);
   }
 
   @override

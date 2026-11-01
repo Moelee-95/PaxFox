@@ -9,7 +9,7 @@ import '../core/data/ledger_store.dart';
 import '../core/domain/ledger.dart';
 import '../core/domain/number_format.dart';
 import '../core/presentation/ledger_refresh.dart';
-import '../core/presentation/main_drawer.dart';
+import '../core/presentation/retained_page.dart';
 import '../core/presentation/transaction_tile.dart';
 import '../core/presentation/transaction_menu.dart';
 import '../features/receipts/invoice.dart';
@@ -20,6 +20,7 @@ import 'categories_screen.dart';
 import 'csv_screen.dart';
 import 'cashflow_screen.dart';
 import 'home_screen.dart';
+import 'more_screen.dart';
 import 'overview_screen.dart';
 import 'recurring_screen.dart';
 import '../core/presentation/category_icons.dart';
@@ -54,6 +55,153 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   String _searchQuery = '';
   EntryType? _entryType;
 
+  // Shell navigation never rebuilds page contents. Each page listens only to
+  // data and local view changes, and is retained after its first visit.
+  final _homeChanges = ValueNotifier(0);
+  final _filterChanges = ValueNotifier(0);
+  final _selectionChanges = ValueNotifier(0);
+  final _recurringChanges = ValueNotifier(0);
+  late final _mainPages = <Widget>[
+    RetainedPage(
+      child: ListenableBuilder(
+        listenable: Listenable.merge([
+          widget.store,
+          _homeChanges,
+          _selectionChanges,
+        ]),
+        builder: _buildHome,
+      ),
+    ),
+    RetainedPage(
+      child: ListenableBuilder(
+        listenable: Listenable.merge([widget.store, _recurringChanges]),
+        builder: (_, _) => OverviewScreen(
+          store: widget.store,
+          recurringError: _recurringError,
+          onOpenRecurring: _openRecurring,
+        ),
+      ),
+    ),
+    const CashflowScreen(),
+    RetainedPage(
+      child: ListenableBuilder(
+        listenable: widget.store,
+        builder: (_, _) =>
+            MoreScreen(store: widget.store, onSelected: _openMenu),
+      ),
+    ),
+  ];
+  late final _transactions = ListenableBuilder(
+    listenable: Listenable.merge([
+      widget.store,
+      _filterChanges,
+      _selectionChanges,
+    ]),
+    builder: (_, _) => TransactionsScreen(
+      entries: widget.store.searchEntries(
+        query: _searchQuery,
+        type: _entryType,
+      ),
+      search: _searchQuery,
+      type: _entryType,
+      onSearchChanged: (value) => _changeFilter(() => _searchQuery = value),
+      onTypeChanged: (value) => _changeFilter(() => _entryType = value),
+      tileBuilder: _transactionTile,
+    ),
+  );
+
+  void _clearSelection() {
+    if (_selectedIds.isEmpty) return;
+    _selectedIds.clear();
+    _selectionChanges.value++;
+  }
+
+  void _changeSelection(VoidCallback update) {
+    setState(update);
+    _selectionChanges.value++;
+  }
+
+  void _changeHome(VoidCallback update) {
+    setState(() {
+      update();
+      _clearSelection();
+    });
+    _homeChanges.value++;
+  }
+
+  void _changeFilter(VoidCallback update) {
+    update();
+    if (_selectedIds.isNotEmpty) setState(_clearSelection);
+    _filterChanges.value++;
+  }
+
+  void _setBulkBusy(bool value) {
+    if (_bulkBusy != value) _changeSelection(() => _bulkBusy = value);
+  }
+
+  void _onPageChanged(int index) {
+    if (_navigationIndex == index) return;
+    _exitTimer?.cancel();
+    setState(() {
+      _navigationIndex = index;
+      _clearSelection();
+    });
+  }
+
+  void _selectPage(int index) {
+    _homeEdgeDrag?.cancel();
+    _homeEdgeDrag = null;
+    _exitTimer?.cancel();
+    if (_showTransactions ||
+        _navigationIndex != index ||
+        _selectedIds.isNotEmpty) {
+      setState(() {
+        _showTransactions = false;
+        _navigationIndex = index;
+        _clearSelection();
+      });
+    }
+    if (_pageController.hasClients) _pageController.jumpToPage(index);
+  }
+
+  Widget _buildHome(BuildContext context, Widget? _) => HomeScreen(
+    categoryColor: (name) {
+      final value = widget.store.categoryFor(name, EntryType.expense)?.color;
+      return value == null ? null : Color(value);
+    },
+    categoryIcon: (name) => categoryIconData(
+      widget.store.categoryFor(name, EntryType.expense)?.icon ??
+          CategoryIcon.general,
+    ),
+    currency: widget.store.currency,
+    month: _month,
+    summary: widget.store.monthSummary(_month),
+    tab: _homeTab,
+    selectedCategory: _homeCategory,
+    onCategoryChanged: (value) => _changeHome(() => _homeCategory = value),
+    onTabChanged: (value) => _changeHome(() {
+      _homeTab = value;
+      _homeCategory = null;
+    }),
+    onMonthChanged: _changeMonth,
+    tileBuilder: (entry) => _transactionTile(entry, compact: true),
+    onOverviewDragStart: (details) {
+      _homeEdgeDrag?.cancel();
+      _exitTimer?.cancel();
+      _swipeStartPage = 0;
+      _homeEdgeDrag = _pageController.position.drag(
+        details,
+        () => _homeEdgeDrag = null,
+      );
+    },
+    onOverviewDragUpdate: (details) => _homeEdgeDrag?.update(details),
+    onOverviewDragEnd: (details) {
+      final drag = _homeEdgeDrag;
+      _homeEdgeDrag = null;
+      drag?.end(details);
+    },
+  );
+
   @override
   void initState() {
     super.initState();
@@ -66,6 +214,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     _exitTimer?.cancel();
     _homeEdgeDrag?.cancel();
     _pageController.dispose();
+    _homeChanges.dispose();
+    _filterChanges.dispose();
+    _selectionChanges.dispose();
+    _recurringChanges.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -90,13 +242,16 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     try {
       await widget.store.processRecurring();
       if (mounted) {
-        setState(() => _recurringError = null);
+        if (_recurringError != null) {
+          _recurringError = null;
+          _recurringChanges.value++;
+        }
       }
     } catch (_) {
       if (mounted) {
-        setState(
-          () => _recurringError = 'Scheduled payments could not be checked. Open Recurring to retry.',
-        );
+        _recurringError =
+            'Scheduled payments could not be checked. Open Recurring to retry.';
+        _recurringChanges.value++;
       }
     } finally {
       _checkingRecurring = false;
@@ -109,7 +264,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       builder: (_) => RecurringScreen(store: widget.store),
     ),
   );
-  void _toggleSelection(LedgerEntry entry) => setState(() {
+  void _toggleSelection(LedgerEntry entry) => _changeSelection(() {
     if (!_selectedIds.add(entry.id!)) _selectedIds.remove(entry.id);
   });
 
@@ -182,47 +337,31 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }
 
   void _goHome() {
-    setState(() {
-      _showTransactions = false;
-      _navigationIndex = 0;
-      _month = DateTime(DateTime.now().year, DateTime.now().month);
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _pageController.hasClients) {
-        _pageController.jumpToPage(0);
-      }
-    });
+    _changeHome(
+      () => _month = DateTime(DateTime.now().year, DateTime.now().month),
+    );
+    _selectPage(0);
   }
 
-  void _openMenu(MainMenuDestination destination) {
+  void _openMenu(MoreDestination destination) {
     _exitTimer?.cancel();
-    Navigator.pop(context);
-    if (destination == MainMenuDestination.home) {
-      setState(() {
-        _showTransactions = false;
-        _navigationIndex = 0;
-        _selectedIds.clear();
-      });
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _pageController.hasClients) {
-          _pageController.jumpToPage(0);
-        }
-      });
+    if (destination == MoreDestination.home) {
+      _selectPage(0);
       return;
     }
-    if (destination == MainMenuDestination.transactions) {
+    if (destination == MoreDestination.transactions) {
       setState(() {
         _showTransactions = true;
-        _selectedIds.clear();
+        _clearSelection();
       });
       return;
     }
     final screen = switch (destination) {
-      MainMenuDestination.categories => CategoriesScreen(store: widget.store),
-      MainMenuDestination.accounts => AccountsScreen(store: widget.store),
-      MainMenuDestination.settings => SettingsScreen(store: widget.store),
-      MainMenuDestination.csv => CsvScreen(store: widget.store),
-      MainMenuDestination.recurring => RecurringScreen(store: widget.store),
+      MoreDestination.categories => CategoriesScreen(store: widget.store),
+      MoreDestination.accounts => AccountsScreen(store: widget.store),
+      MoreDestination.settings => SettingsScreen(store: widget.store),
+      MoreDestination.csv => CsvScreen(store: widget.store),
+      MoreDestination.recurring => RecurringScreen(store: widget.store),
       _ => throw StateError('Unsupported menu destination: $destination'),
     };
     Navigator.push(context, MaterialPageRoute<void>(builder: (_) => screen));
@@ -232,19 +371,21 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     if (!_showTransactions && _navigationIndex == 0) {
       final summary = widget.store.monthSummary(_month);
       if (_homeTab == 2) {
-        return summary.spendingEntries
-            .where((entry) => entry.category == _homeCategory)
-            .toList();
+        return _homeCategory == null
+            ? const []
+            : summary.spendingForCategory(
+                widget.store.currency,
+                _homeCategory!,
+              );
       }
       return _homeTab == 1 ? summary.incomeEntries : summary.spendingEntries;
     }
     return widget.store.searchEntries(query: _searchQuery, type: _entryType);
   }
 
-  void _changeMonth(DateTime value) => setState(() {
+  void _changeMonth(DateTime value) => _changeHome(() {
     _month = value;
     _homeCategory = null;
-    _selectedIds.clear();
   });
 
   Widget _transactionTile(LedgerEntry entry, {bool compact = false}) =>
@@ -252,6 +393,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         key: ValueKey(entry.id),
         entry: entry,
         categoryIcon: widget.store.iconFor(entry),
+        categoryColor: switch (widget.store.colorFor(entry)) {
+          final value? => Color(value),
+          null => null,
+        },
         compact: compact,
         selected: _selectedIds.contains(entry.id),
         selectionMode: _selectedIds.isNotEmpty,
@@ -268,7 +413,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       tooltip: 'Select all visible',
       onPressed: _bulkBusy
           ? null
-          : () => setState(() {
+          : () => _changeSelection(() {
               _selectedIds.addAll(_visibleEntries().map((e) => e.id!));
             }),
       icon: const Icon(Icons.select_all),
@@ -297,14 +442,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   Future<void> _applyBulkAction(TransactionBulkAction action) async {
     final ids = {..._selectedIds};
     try {
-      final updated = await TransactionBulkEditor(widget.store).apply(
-        context,
-        action,
-        ids,
-        onSaving: () => setState(() => _bulkBusy = true),
-      );
+      final updated = await TransactionBulkEditor(widget.store)
+          .apply(context, action, ids, onSaving: () => _setBulkBusy(true));
       if (updated && mounted) {
-        setState(_selectedIds.clear);
+        _changeSelection(_selectedIds.clear);
         _showMessage('${formatInteger(ids.length)} transactions updated.');
       }
     } on ArgumentError catch (error) {
@@ -316,7 +457,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         );
       }
     } finally {
-      if (mounted) setState(() => _bulkBusy = false);
+      if (mounted) _setBulkBusy(false);
     }
   }
 
@@ -325,230 +466,162 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           .showSnackBar(SnackBar(content: Text(message)));
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: widget.store,
-    builder: (context, _) {
-      final summary = widget.store.monthSummary(_month);
-      return PopScope(
-        canPop: false,
-        onPopInvokedWithResult: (didPop, result) {
-          if (!didPop && _selectedIds.isNotEmpty && !_bulkBusy) {
-            setState(_selectedIds.clear);
-            _exitTimer?.cancel();
-          } else if (!didPop && _showTransactions) {
-            setState(() {
-              _showTransactions = false;
-            });
-            _exitTimer?.cancel();
-          } else if (!didPop && !_bulkBusy) {
-            if (_exitTimer?.isActive == true) {
-              _exitTimer?.cancel();
-              SystemNavigator.pop();
-            } else {
-              _exitTimer = Timer(const Duration(seconds: 2), () {});
-              ScaffoldMessenger.of(context).hideCurrentSnackBar();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Tap back again to exit'),
-                  duration: Duration(seconds: 2),
-                ),
-              );
-            }
-          }
-        },
-        child: Scaffold(
-          appBar: AppBar(
-            bottom: _bulkBusy
-                ? const PreferredSize(
-                    preferredSize: Size.fromHeight(2),
-                    child: LinearProgressIndicator(),
-                  )
-                : null,
-            actions: _selectedIds.isNotEmpty ? _selectionActions() : null,
-            title: Text(
-              _selectedIds.isNotEmpty
-                  ? '${formatInteger(_selectedIds.length)} selected'
-                  : _showTransactions
-                  ? 'All transactions'
-                  : _navigationIndex == 1
-                  ? 'Overview'
-                  : 'Moneva',
+  Widget build(BuildContext context) => PopScope(
+    canPop: false,
+    onPopInvokedWithResult: (didPop, result) {
+      if (!didPop && _selectedIds.isNotEmpty && !_bulkBusy) {
+        _changeSelection(_selectedIds.clear);
+        _exitTimer?.cancel();
+      } else if (!didPop && _showTransactions) {
+        setState(() {
+          _showTransactions = false;
+        });
+        _exitTimer?.cancel();
+      } else if (!didPop &&
+          !_bulkBusy &&
+          _navigationIndex == 0 &&
+          _homeTab == 2 &&
+          _homeCategory != null) {
+        _changeHome(() => _homeCategory = null);
+        _exitTimer?.cancel();
+      } else if (!didPop && !_bulkBusy) {
+        if (_exitTimer?.isActive == true) {
+          _exitTimer?.cancel();
+          SystemNavigator.pop();
+        } else {
+          _exitTimer = Timer(const Duration(seconds: 2), () {});
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Tap back again to exit'),
+              duration: Duration(seconds: 2),
             ),
-            leading: _selectedIds.isNotEmpty
-                ? IconButton(
-                    tooltip: 'Cancel selection',
-                    onPressed: _bulkBusy
-                        ? null
-                        : () => setState(_selectedIds.clear),
-                    icon: const Icon(Icons.close),
-                  )
-                : Builder(
-                    builder: (context) => IconButton(
-                      tooltip: 'Open menu',
-                      icon: const Icon(Icons.menu),
-                      onPressed: () => Scaffold.of(context).openDrawer(),
-                    ),
-                  ),
-          ),
-          drawer: MainDrawer(
-            onSelected: _openMenu,
-            showTransactions: _showTransactions,
-          ),
-          body: LedgerRefresh(
-            store: widget.store,
-            child: Align(
-              alignment: Alignment.topCenter,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 900),
-                child: IndexedStack(
-                  index: _showTransactions ? 1 : 0,
-                  children: [
-                    TickerMode(
-                      enabled: !_showTransactions,
-                      child: NotificationListener<ScrollStartNotification>(
-                        onNotification: (notification) {
-                          if (notification.depth == 0 &&
-                              notification.dragDetails != null) {
-                            _swipeStartPage =
-                                _pageController.page?.roundToDouble() ??
-                                _navigationIndex.toDouble();
-                          }
-                          return false;
-                        },
-                        child: PageView.builder(
-                          key: const ValueKey('main-pages'),
-                          controller: _pageController,
-                          onPageChanged: (index) => setState(() {
-                            _exitTimer?.cancel();
-                            _navigationIndex = index;
-                            _selectedIds.clear();
-                          }),
-                          itemCount: 3,
-                          pageSnapping: false,
-                          physics: _ShortSwipePagePhysics(
-                            startPage: () => _swipeStartPage,
-                          ),
-                          itemBuilder: (context, index) => switch (index) {
-                            0 => HomeScreen(
-                              currency: widget.store.currency,
-                              categoryIcon: (name) => categoryIconData(
-                                widget.store
-                                        .categoriesFor(EntryType.expense)
-                                        .where((c) => c.name == name)
-                                        .firstOrNull
-                                        ?.icon ??
-                                    CategoryIcon.general,
-                              ),
-                              month: _month,
-                              summary: summary,
-                              tab: _homeTab,
-                              onOverviewDragStart: (details) {
-                                _homeEdgeDrag?.cancel();
-                                _exitTimer?.cancel();
-                                _swipeStartPage = 0;
-                                _homeEdgeDrag = _pageController.position.drag(
-                                  details,
-                                  () => _homeEdgeDrag = null,
-                                );
-                              },
-                              onOverviewDragUpdate: (details) =>
-                                  _homeEdgeDrag?.update(details),
-                              onOverviewDragEnd: (details) {
-                                final drag = _homeEdgeDrag;
-                                _homeEdgeDrag = null;
-                                drag?.end(details);
-                              },
-                              selectedCategory: _homeCategory,
-                              onCategoryChanged: (category) => setState(() {
-                                _homeCategory = category;
-                                _selectedIds.clear();
-                              }),
-                              onTabChanged: (tab) => setState(() {
-                                _homeTab = tab;
-                                _homeCategory = null;
-                                _selectedIds.clear();
-                              }),
-                              onMonthChanged: _changeMonth,
-                              tileBuilder: (entry) =>
-                                  _transactionTile(entry, compact: true),
-                            ),
-                            1 => OverviewScreen(
-                              store: widget.store,
-                              recurringError: _recurringError,
-                              onOpenRecurring: _openRecurring,
-                            ),
-                            2 => const CashflowScreen(),
-                            _ => throw StateError('Unknown page'),
-                          },
-                        ),
+          );
+        }
+      }
+    },
+    child: Scaffold(
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        bottom: _bulkBusy
+            ? const PreferredSize(
+                preferredSize: Size.fromHeight(2),
+                child: LinearProgressIndicator(),
+              )
+            : null,
+        actions: _selectedIds.isNotEmpty ? _selectionActions() : null,
+        title: Text(
+          _selectedIds.isNotEmpty
+              ? '${formatInteger(_selectedIds.length)} selected'
+              : _showTransactions
+              ? 'All transactions'
+              : _navigationIndex == 1
+              ? 'Overview'
+              : _navigationIndex == 2
+              ? 'Cashflow'
+              : _navigationIndex == 3
+              ? 'More'
+              : 'Paxlee',
+        ),
+        leading: _selectedIds.isNotEmpty
+            ? IconButton(
+                tooltip: 'Cancel selection',
+                onPressed: _bulkBusy
+                    ? null
+                    : () => _changeSelection(_selectedIds.clear),
+                icon: const Icon(Icons.close),
+              )
+            : _showTransactions
+            ? BackButton(
+                onPressed: () => setState(() {
+                  _showTransactions = false;
+                  _exitTimer?.cancel();
+                }),
+              )
+            : null,
+      ),
+      body: LedgerRefresh(
+        store: widget.store,
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 900),
+            child: IndexedStack(
+              index: _showTransactions ? 1 : 0,
+              children: [
+                TickerMode(
+                  enabled: !_showTransactions,
+                  child: NotificationListener<ScrollStartNotification>(
+                    onNotification: (notification) {
+                      if (notification.depth == 0 &&
+                          notification.dragDetails != null) {
+                        _swipeStartPage =
+                            _pageController.page?.roundToDouble() ??
+                            _navigationIndex.toDouble();
+                      }
+                      return false;
+                    },
+                    child: PageView.builder(
+                      key: const ValueKey('main-pages'),
+                      controller: _pageController,
+                      onPageChanged: _onPageChanged,
+                      itemCount: 4,
+                      pageSnapping: false,
+                      physics: _ShortSwipePagePhysics(
+                        startPage: () => _swipeStartPage,
+                      ),
+                      itemBuilder: (_, index) => TickerMode(
+                        enabled:
+                            !_showTransactions && _navigationIndex == index,
+                        child: _mainPages[index],
                       ),
                     ),
-                    if (_showTransactions)
-                      TransactionsScreen(
-                        entries: widget.store.searchEntries(
-                          query: _searchQuery,
-                          type: _entryType,
-                        ),
-                        search: _searchQuery,
-                        type: _entryType,
-                        onSearchChanged: (value) => setState(() {
-                          _searchQuery = value;
-                          _selectedIds.clear();
-                        }),
-                        onTypeChanged: (value) => setState(() {
-                          _entryType = value;
-                          _selectedIds.clear();
-                        }),
-                        tileBuilder: _transactionTile,
-                      )
-                    else
-                      const SizedBox.shrink(),
-                  ],
+                  ),
                 ),
-              ),
+                if (_showTransactions)
+                  _transactions
+                else
+                  const SizedBox.shrink(),
+              ],
             ),
           ),
-          floatingActionButton: _selectedIds.isNotEmpty
-              ? null
-              : FloatingActionButton(
-                  key: _addButtonKey,
-                  onPressed: _createTransaction,
-                  tooltip: 'Add transaction',
-                  child: const Icon(Icons.add),
-                ),
-          bottomNavigationBar: _showTransactions
-              ? null
-              : NavigationBar(
-                  selectedIndex: _navigationIndex,
-                  onDestinationSelected: (index) {
-                    _homeEdgeDrag?.cancel();
-                    _homeEdgeDrag = null;
-                    _exitTimer?.cancel();
-                    _pageController.jumpToPage(index);
-                    setState(() {
-                      _selectedIds.clear();
-                      _navigationIndex = index;
-                      _showTransactions = false;
-                    });
-                  },
-                  destinations: const [
-                    NavigationDestination(
-                      icon: Icon(Icons.home_outlined),
-                      label: 'Home',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.dashboard_outlined),
-                      label: 'Overview',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.timeline),
-                      label: 'Cashflow',
-                    ),
-                  ],
-                ),
         ),
-      );
-    },
+      ),
+      floatingActionButton:
+          _selectedIds.isNotEmpty ||
+              (!_showTransactions && _navigationIndex == 3)
+          ? null
+          : FloatingActionButton(
+              key: _addButtonKey,
+              onPressed: _createTransaction,
+              tooltip: 'Add transaction',
+              child: const Icon(Icons.add),
+            ),
+      bottomNavigationBar: _showTransactions
+          ? null
+          : NavigationBar(
+              selectedIndex: _navigationIndex,
+              onDestinationSelected: _selectPage,
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.home_outlined),
+                  label: 'Home',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.dashboard_outlined),
+                  label: 'Overview',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.timeline),
+                  label: 'Cashflow',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.more_horiz),
+                  label: 'More',
+                ),
+              ],
+            ),
+    ),
   );
 }
 

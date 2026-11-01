@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 
-import '../core/presentation/grouped_amount_formatter.dart';
-
 import '../core/data/ledger_store.dart';
 import '../core/domain/ledger.dart';
-import '../core/presentation/ledger_refresh.dart';
-import '../core/presentation/debt_editor.dart';
-import '../core/presentation/info_button.dart';
+import '../core/presentation/async_action.dart';
 import '../core/presentation/confirmation_dialog.dart';
+import '../core/presentation/debt_editor.dart';
+import '../core/presentation/grouped_amount_formatter.dart';
+import '../core/presentation/info_button.dart';
+import '../core/presentation/ledger_refresh.dart';
 
 class AccountsScreen extends StatelessWidget {
   const AccountsScreen({super.key, required this.store});
@@ -170,8 +170,9 @@ class _AccountFormState extends State<AccountForm> {
   late AccountKind kind;
   late DateTime asOf;
   late bool available, overdraft;
-  bool busy = false;
-  String? error;
+  late final action = AsyncAction()..addListener(() => setState(() {}));
+  bool get busy => action.busy;
+  String? get error => action.error;
   bool get editing => widget.account != null;
   @override
   void initState() {
@@ -195,6 +196,7 @@ class _AccountFormState extends State<AccountForm> {
   void dispose() {
     name.dispose();
     balance.dispose();
+    action.dispose();
     super.dispose();
   }
 
@@ -210,11 +212,7 @@ class _AccountFormState extends State<AccountForm> {
     if (!form.currentState!.validate()) {
       return;
     }
-    setState(() {
-      busy = true;
-      error = null;
-    });
-    try {
+    final saved = await action.run(() async {
       final old = widget.account;
       final desired = amount();
       // Balance correction adjusts the opening baseline without deleting or
@@ -240,24 +238,8 @@ class _AccountFormState extends State<AccountForm> {
       } else {
         await widget.store.updateAccount(account);
       }
-      if (mounted) {
-        Navigator.pop(context);
-      }
-    } on ArgumentError catch (e) {
-      if (mounted) {
-        setState(() {
-          busy = false;
-          error = '${e.message}';
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          busy = false;
-          error = 'Could not save account. Please retry.';
-        });
-      }
-    }
+    }, failureMessage: 'Could not save account. Please retry.');
+    if (saved && mounted) Navigator.pop(context);
   }
 
   Future<void> delete() async {
@@ -267,23 +249,11 @@ class _AccountFormState extends State<AccountForm> {
       message: 'This removes the unused bank account and its starting balance.',
     );
     if (yes != true || !mounted) return;
-    setState(() {
-      busy = true;
-      error = null;
-    });
-    try {
-      await widget.store.deleteBankAccount(widget.account!.id!);
-      if (mounted) Navigator.pop(context);
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          busy = false;
-          error = e is ArgumentError
-              ? '${e.message}'
-              : 'Could not delete account. Please retry.';
-        });
-      }
-    }
+    final deleted = await action.run(
+      () => widget.store.deleteBankAccount(widget.account!.id!),
+      failureMessage: 'Could not delete account. Please retry.',
+    );
+    if (deleted && mounted) Navigator.pop(context);
   }
 
   @override

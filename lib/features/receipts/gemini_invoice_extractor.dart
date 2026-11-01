@@ -1,11 +1,14 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
-import 'invoice.dart';
+import '../../core/domain/app_failure.dart';
 import '../../core/domain/ledger.dart';
 import 'gemini_key_provider.dart';
+import 'invoice.dart';
 import 'invoice_image_preparation.dart';
 
 abstract interface class InvoiceExtractor {
@@ -47,9 +50,40 @@ class GeminiInvoiceExtractor implements InvoiceExtractor {
     List<File> images,
     Set<String> categories,
   ) async {
+    try {
+      return await _extract(images, categories).timeout(
+        timeout,
+        onTimeout: () {
+          cancel();
+          throw const InvoiceExtractionException(
+            'Extraction timed out. Retry with fewer pages or increase the limit in Settings.',
+          );
+        },
+      );
+    } on AppFailure {
+      rethrow;
+    } on FormatException {
+      throw const InvoiceExtractionException(
+        'Gemini returned an unreadable response. Please extract again or enter the items manually.',
+      );
+    } catch (error) {
+      _checkCancelled();
+      throw InvoiceExtractionException(
+        AppFailure.messageFor(
+          error,
+          fallback: 'Extraction failed. Your images are still available. Please retry.',
+        ),
+      );
+    }
+  }
+
+  Future<InvoiceDraft> _extract(
+    List<File> images,
+    Set<String> categories,
+  ) async {
     _checkCancelled();
     if (images.isEmpty || images.length > 10) {
-      throw ArgumentError('Use 1 to 10 invoice images.');
+      throw const InvoiceExtractionException('Use 1 to 10 invoice images.');
     }
     final parts = <Map<String, dynamic>>[
       {
@@ -60,22 +94,25 @@ GERMAN RECEIPT RULES: comma decimals such as 3,99 mean 3.99 EUR. Preserve separa
 Money must be decimal STRINGS with dot, no grouping, max ${currency.exponent} decimals in the original currency. Quantities are decimal strings. Extract actual items, discounts and deposits, not subtotal/total/payment/tax summaries as extra items. Line totals include quantity. Item discounts may be negative. Grand total is amount charged, not cash tendered or change. VAT already included in prices is NOT added again. adjustment only for explicitly identified tax/tip/discount/rounding not already in item totals; explain it. If no explicit adjustment, use "0.00". Do not fabricate an adjustment merely to reconcile. Empty item list is valid when unreadable.''',
       },
     ];
+    final imageBytes = <Uint8List>[];
     var payloadSize = 0;
     for (final image in images) {
-      onProgress?.call('Preparing image ${parts.length} of ${images.length}');
+      onProgress?.call(
+        'Preparing image ${imageBytes.length + 1} of ${images.length}',
+      );
       _checkCancelled();
       final bytes = await InvoiceImagePreparation.bytesFor(image);
       _checkCancelled();
       payloadSize += bytes.length;
       if (payloadSize > 12 * 1024 * 1024) {
-        throw ArgumentError(
+        throw const InvoiceExtractionException(
           'Images exceed the upload size limit. Use fewer pages.',
         );
       }
-      parts.add({
-        'inline_data': {'mime_type': 'image/jpeg', 'data': base64Encode(bytes)},
-      });
+      imageBytes.add(bytes);
     }
+    _checkCancelled();
+    final body = await compute(_encodeRequest, (parts, imageBytes));
     _checkCancelled();
     final requestClient = client ?? http.Client();
     _activeClient = requestClient;
@@ -86,60 +123,49 @@ Money must be decimal STRINGS with dot, no grouping, max ${currency.exponent} de
               GeminiKeyProvider.fetchKey(client: requestClient));
       _checkCancelled();
       onProgress?.call('Waiting for Gemini to extract items');
-      final response = await requestClient
-          .post(
-            Uri.https(
-              'generativelanguage.googleapis.com',
-              '/v1beta/models/$model:generateContent',
-            ),
-            headers: {
-              'Content-Type': 'application/json',
-              'x-goog-api-key': key,
-            },
-            body: jsonEncode({
-              'contents': [
-                {'parts': parts},
-              ],
-              'generationConfig': {
-                'temperature': 0.1,
-                'maxOutputTokens': 16000,
-                'responseMimeType': 'application/json',
-              },
-            }),
-          )
-          .timeout(timeout);
+      final response = await requestClient.post(
+        Uri.https(
+          'generativelanguage.googleapis.com',
+          '/v1beta/models/$model:generateContent',
+        ),
+        headers: {'Content-Type': 'application/json', 'x-goog-api-key': key},
+        body: body,
+      );
+      _checkCancelled();
       if (response.statusCode != 200) {
         throw InvoiceExtractionException(
-          'Gemini returned HTTP ${response.statusCode}. Check the key service, quota and model configuration.',
+          AppFailure.serviceMessage(response.statusCode, 'Gemini'),
         );
       }
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final candidates = data['candidates'] as List?;
+      final data = jsonDecode(response.body);
+      if (data is! Map<String, dynamic>) throw const FormatException();
+      final candidates = data['candidates'];
+      if (candidates != null && candidates is! List) {
+        throw const FormatException();
+      }
       if (candidates == null || candidates.isEmpty) {
         throw const InvoiceExtractionException(
           'Gemini could not read this invoice. Try clearer photos and extract again.',
         );
       }
-      final candidate = candidates.first as Map;
+      final candidate = candidates.first;
+      if (candidate is! Map) throw const FormatException();
       if (candidate['finishReason'] != 'STOP') {
         throw const InvoiceExtractionException(
           'Gemini returned incomplete or blocked output. Use fewer/clearer images.',
         );
       }
-      final result = ((candidate['content'] as Map)['parts'] as List)
-          .where((p) => (p as Map)['thought'] != true && p['text'] is String)
+      final content = candidate['content'];
+      if (content is! Map || content['parts'] is! List) {
+        throw const FormatException();
+      }
+      final result = (content['parts'] as List)
+          .whereType<Map>()
+          .where((p) => p['thought'] != true && p['text'] is String)
           .map((p) => p['text'] as String)
           .join();
       onProgress?.call('Checking extracted items');
       return parseInvoice(result, categories, currency: currency);
-    } on InvoiceExtractionException {
-      rethrow;
-    } on GeminiKeyException {
-      rethrow;
-    } catch (_) {
-      throw const InvoiceExtractionException(
-        'Extraction failed. Check your connection and try again.',
-      );
     } finally {
       _activeClient = null;
       if (client == null) {
@@ -149,9 +175,29 @@ Money must be decimal STRINGS with dot, no grouping, max ${currency.exponent} de
   }
 }
 
-class InvoiceExtractionException implements Exception {
-  const InvoiceExtractionException(this.message);
-  final String message;
-  @override
-  String toString() => message;
+String _encodeRequest((List<Map<String, dynamic>>, List<Uint8List>) input) =>
+    jsonEncode({
+      'contents': [
+        {
+          'parts': [
+            ...input.$1,
+            for (final bytes in input.$2)
+              {
+                'inline_data': {
+                  'mime_type': 'image/jpeg',
+                  'data': base64Encode(bytes),
+                },
+              },
+          ],
+        },
+      ],
+      'generationConfig': {
+        'temperature': 0.1,
+        'maxOutputTokens': 16000,
+        'responseMimeType': 'application/json',
+      },
+    });
+
+class InvoiceExtractionException extends AppFailure {
+  const InvoiceExtractionException(super.message);
 }

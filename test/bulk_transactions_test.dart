@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import 'helpers/wait_for_store.dart';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moneva/core/data/ledger_store.dart';
 import 'package:moneva/core/domain/ledger.dart';
@@ -124,7 +127,11 @@ void main() {
       await tester.drag(find.byType(TabBarView), const Offset(650, 0));
       await tester.pumpAndSettle();
       expect(find.text('Bread'), findsOneWidget);
+      await tester.ensureVisible(find.text('Bread'));
+      await tester.pumpAndSettle();
       await tester.longPress(find.text('Bread'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Milk'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Milk'));
       await tester.pumpAndSettle();
@@ -139,7 +146,14 @@ void main() {
       await tester.pumpAndSettle();
       await tester.runAsync(() async {
         await tester.tap(find.text('Dining out'));
-        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await waitForStore(
+          store,
+          () =>
+              store.entries
+                  .where((entry) => entry.category == 'Dining out')
+                  .length ==
+              2,
+        );
       });
       await tester.pumpAndSettle();
       expect(
@@ -161,7 +175,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.runAsync(() async {
         await tester.tap(find.text('Delete'));
-        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await waitForStore(store, () => store.entries.length == 1);
       });
       await tester.pumpAndSettle();
       expect(store.entries.single.description, 'Payday');

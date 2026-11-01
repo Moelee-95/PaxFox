@@ -133,6 +133,37 @@ void main() {
     },
   );
 
+  test(
+    'a temporary-directory failure can be retried without reopening capture',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'moneva_temp_retry_',
+      );
+      final source = await File('${directory.path}/source.png')
+          .writeAsBytes(receiptPng(100, 200));
+      var attempts = 0;
+      final preparation = InvoiceImagePreparation(
+        temporaryDirectory: () async {
+          if (attempts++ == 0) throw const FileSystemException('Unavailable');
+          return directory;
+        },
+      );
+      try {
+        await expectLater(
+          preparation.prepare(source),
+          throwsA(isA<FileSystemException>()),
+        );
+        final prepared = await preparation.prepare(source);
+        expect(await prepared.exists(), isTrue);
+        expect(await source.exists(), isTrue);
+      } finally {
+        await preparation.dispose();
+        await source.delete();
+        await directory.delete();
+      }
+    },
+  );
+
   test('failed image preparation cleans only its own files', () async {
     final directory = await Directory.systemTemp.createTemp(
       'moneva_invalid_image_test_',

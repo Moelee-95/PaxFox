@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../core/data/ledger_store.dart';
 import '../core/domain/category.dart';
+import 'category_form.dart';
+import '../core/presentation/category_colors.dart';
 import '../core/presentation/category_icons.dart';
-import '../core/presentation/ledger_refresh.dart';
 import '../core/presentation/info_button.dart';
-import '../core/presentation/category_icon_picker.dart';
+import '../core/presentation/ledger_refresh.dart';
 
 class CategoriesScreen extends StatelessWidget {
   const CategoriesScreen({super.key, required this.store});
@@ -63,7 +64,21 @@ class CategoriesScreen extends StatelessWidget {
                         }
                         final category = categories[index];
                         return ListTile(
-                          leading: Icon(categoryIconData(category.icon)),
+                          leading: CircleAvatar(
+                            backgroundColor: Color(
+                              category.color ??
+                                  defaultCategoryColor(category.kind),
+                            ),
+                            foregroundColor: categoryForeground(
+                              Color(
+                                category.color ??
+                                    defaultCategoryColor(category.kind),
+                              ),
+                            ),
+                            child: categoryGlyph(
+                              categoryIconData(category.icon),
+                            ),
+                          ),
                           title: Text(category.name),
                           trailing: IconButton(
                             tooltip: 'Edit ${category.name}',
@@ -86,139 +101,11 @@ class CategoriesScreen extends StatelessWidget {
     BuildContext context,
     CategoryKind kind, [
     LedgerCategory? category,
-  ]) => showDialog<void>(
-    context: context,
-    builder: (_) =>
-        _CategoryDialog(store: store, kind: kind, category: category),
-  );
-}
-
-class _CategoryDialog extends StatefulWidget {
-  const _CategoryDialog({
-    required this.store,
-    required this.kind,
-    this.category,
-  });
-  final LedgerStore store;
-  final CategoryKind kind;
-  final LedgerCategory? category;
-  @override
-  State<_CategoryDialog> createState() => _CategoryDialogState();
-}
-
-class _CategoryDialogState extends State<_CategoryDialog> {
-  late CategoryIcon icon = widget.category?.icon ?? CategoryIcon.general;
-  late final TextEditingController name = TextEditingController(
-    text: widget.category?.name ?? '',
-  );
-  final form = GlobalKey<FormState>();
-  bool saving = false;
-  String? error;
-  @override
-  void dispose() {
-    name.dispose();
-    super.dispose();
-  }
-
-  Future<void> save() async {
-    if (!form.currentState!.validate()) {
-      return;
-    }
-    setState(() {
-      saving = true;
-      error = null;
-    });
-    try {
-      await widget.store.saveCategory(
-        id: widget.category?.id,
-        kind: widget.kind,
-        name: name.text,
-        icon: icon,
-      );
-      if (mounted) {
-        Navigator.pop(context);
-      }
-    } on ArgumentError catch (e) {
-      if (mounted) {
-        setState(() {
-          saving = false;
-          error = e.message as String;
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          saving = false;
-          error = 'Could not save category. Please retry.';
-        });
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => PopScope(
-    canPop: !saving,
-    child: AlertDialog(
-      title: Row(
-        children: [
-          Expanded(
-            child: Text(
-              widget.category == null ? 'Add category' : 'Edit category',
-            ),
-          ),
-          InfoButton(
-            title: 'Category information',
-            message:
-                '${widget.kind == CategoryKind.expense ? 'Expense category' : 'Income category'}. Saving updates this category on existing transactions too.',
-          ),
-        ],
-      ),
-      content: Form(
-        key: form,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: name,
-                autofocus: true,
-                enabled: !saving,
-                maxLength: 80,
-                decoration: const InputDecoration(labelText: 'Category name'),
-                validator: (s) => s == null || s.trim().isEmpty
-                    ? 'Enter a category name.'
-                    : null,
-                onFieldSubmitted: (_) {
-                  if (!saving) {
-                    save();
-                  }
-                },
-              ),
-              const SizedBox(height: 12),
-              CategoryIconPicker(
-                value: icon,
-                enabled: !saving,
-                onChanged: (value) => setState(() => icon = value),
-              ),
-              if (error != null)
-                Text(
-                  error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: saving ? null : () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: saving ? null : save,
-          child: Text(saving ? 'Saving...' : 'Save category'),
-        ),
-      ],
+  ]) => Navigator.push<void>(
+    context,
+    MaterialPageRoute<void>(
+      builder: (_) =>
+          CategoryForm(store: store, kind: kind, category: category),
     ),
   );
 }

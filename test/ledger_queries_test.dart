@@ -48,6 +48,17 @@ void main() {
     expect(october.eurTotals.spending, 900);
     expect(october.eurTotals.net, 4100);
     expect(october.spendingByCategory[(Currency.eur, 'Groceries')], 900);
+    final categoryRows = october.spendingForCategory(Currency.eur, 'Groceries');
+    expect(categoryRows.map((entry) => entry.id), [2, 3]);
+    expect(
+      october.spendingForCategory(Currency.eur, 'Groceries'),
+      same(categoryRows),
+    );
+    expect(() => categoryRows.clear(), throwsUnsupportedError);
+    final ranked = october.rankedCategories(Currency.eur);
+    expect(ranked.single.value, 900);
+    expect(october.rankedCategories(Currency.eur), same(ranked));
+    expect(() => ranked.clear(), throwsUnsupportedError);
     expect(ledger.forMonth(DateTime(2026, 10, 31)), same(october));
     expect(ledger.forMonth(DateTime(2025, 10)).eurTotals.spending, 900);
   });
@@ -116,6 +127,24 @@ void main() {
       () => ledger.search(query: 'purchase').clear(),
       throwsUnsupportedError,
     );
+  });
+
+  test('type-filter caches survive switching filters and text searches', () {
+    final ledger = LedgerIndex([
+      entry(EntryType.expense, 100, id: 1),
+      entry(EntryType.refund, 50, id: 2),
+      entry(EntryType.income, 200, id: 3),
+      entry(EntryType.expense, 300, id: 4),
+    ]);
+    final expenses = ledger.search(type: EntryType.expense);
+    final refunds = ledger.search(type: EntryType.refund);
+    expect(expenses.map((entry) => entry.id), [1, 4]);
+    expect(refunds.single.id, 2);
+    expect(ledger.search(query: 'purchase'), hasLength(4));
+    expect(ledger.search(type: EntryType.expense), same(expenses));
+    expect(ledger.search(type: EntryType.refund), same(refunds));
+    expect(() => expenses.clear(), throwsUnsupportedError);
+    expect(ledger.search(type: EntryType.transfer), isEmpty);
   });
 
   test('batch balances match individual balances across account policies', () {
@@ -257,6 +286,16 @@ void main() {
         final category = store.categories.singleWhere(
           (category) => category.name == 'Groceries',
         );
+        expect(
+          store.categoryFor('Groceries', EntryType.expense),
+          same(category),
+        );
+        expect(
+          store.categoryFor('Groceries', EntryType.refund),
+          same(category),
+        );
+        expect(store.categoryFor('Groceries', EntryType.income), isNull);
+        expect(store.categoryFor('missing', EntryType.expense), isNull);
         store.monthSummary(DateTime(2026, 10));
         await store.saveCategory(
           id: category.id,
@@ -265,6 +304,8 @@ void main() {
           icon: CategoryIcon.dining,
         );
         expect(store.iconFor(store.entries.single), CategoryIcon.dining);
+        expect(store.categoryFor('Groceries', EntryType.expense), isNull);
+        expect(store.categoryFor('Food', EntryType.expense)?.id, category.id);
         expect(store.searchEntries(query: 'groceries'), isEmpty);
         expect(store.searchEntries(query: 'food'), hasLength(1));
         expect(store.monthSummary(DateTime(2026, 10)).spendingByCategory, {
@@ -278,6 +319,45 @@ void main() {
         );
       },
     );
+
+    test('category appearance edits write only the category row', () async {
+      await store.saveEntry(
+        entry(EntryType.expense, 1200, accountId: store.accounts.single.id),
+      );
+      const timestamp = '2026-01-01T00:00:00.000Z';
+      await store.db.update('transactions', {'updated_at': timestamp});
+      await store.db.insert('receipts', {
+        'transaction_id': store.entries.single.id,
+        'total': 1200,
+        'draft': '{"category":"Groceries","items":[]}',
+        'image_paths': '[]',
+        'raw_response': '',
+        'scanned_at': timestamp,
+      });
+      final category = store.categoryFor('Groceries', EntryType.expense)!;
+      Future<int> totalChanges() async =>
+          (await store.db.rawQuery('SELECT total_changes() AS count'))
+                  .single['count']
+              as int;
+      final before = await totalChanges();
+      await store.saveCategory(
+        id: category.id,
+        kind: category.kind,
+        name: category.name,
+        icon: CategoryIcon.dining,
+        color: 0xff55c9a4,
+      );
+
+      expect(await totalChanges() - before, 1);
+      expect(
+        (await store.db.query('transactions')).single['updated_at'],
+        timestamp,
+      );
+      expect(store.colorFor(store.entries.single), 0xff55c9a4);
+      expect(store.iconFor(store.entries.single), CategoryIcon.dining);
+      expect(store.entries.single.amount, 1200);
+      expect(store.monthSummary(DateTime(2026, 10)).eurTotals.spending, 1200);
+    });
 
     test(
       'failed refresh retains the last complete state without notifying',

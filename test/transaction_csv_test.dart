@@ -16,6 +16,43 @@ CsvPreview decode(
   int account = 1,
 }) => TransactionCsv.decode(utf8.encode(text), type, account);
 
+Future<void> selectCsvCard(
+  WidgetTester tester,
+  String prefix,
+  String value,
+) async {
+  final row = find.byKey(ValueKey('$prefix-options'));
+  final scrollable = find.descendant(
+    of: row,
+    matching: find.byType(Scrollable),
+  );
+  final card = find.byKey(ValueKey('$prefix-$value'));
+  // Return to the start to support toggling cards in either direction.
+  tester.state<ScrollableState>(scrollable).position.jumpTo(0);
+  await tester.pump();
+  await tester.scrollUntilVisible(card, 120, scrollable: scrollable);
+  await tester.tap(card);
+  await tester.pump();
+  for (
+    var i = 0;
+    i < 100 && find.byType(LinearProgressIndicator).evaluate().isNotEmpty;
+    i++
+  ) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 10)),
+    );
+    await tester.pump();
+  }
+  await tester.pumpAndSettle();
+}
+
+Future<void> legacyDefaults(WidgetTester tester) async {
+  await selectCsvCard(tester, 'csv-account', 'all');
+  await selectCsvCard(tester, 'csv-account', 'unassigned');
+  await selectCsvCard(tester, 'csv-type', 'all');
+  await selectCsvCard(tester, 'csv-type', 'expense');
+}
+
 void main() {
   test('requested format, euro amounts, reordered headers and German CSV', () {
     final row = decode('${header}1.10.26,Bank Fee,Service,€4.95,').rows.single;
@@ -78,6 +115,114 @@ void main() {
     },
   );
 
+  test('account-aware files validate names, types, currency and both transfer accounts', () {
+    final accounts = [
+      Account(
+        id: 1,
+        name: 'Cash',
+        currency: Currency.eur,
+        opening: 0,
+        asOf: DateTime(2026),
+      ),
+      Account(
+        id: 2,
+        name: 'Bank',
+        currency: Currency.eur,
+        opening: 0,
+        asOf: DateTime(2026),
+      ),
+    ];
+    final columns = '${TransactionCsv.accountHeaders.join(',')}\n';
+    CsvPreview parse(String row, {List<Account>? choices}) =>
+        TransactionCsv.decode(
+          utf8.encode('$columns$row'),
+          null,
+          null,
+          accounts: choices ?? accounts,
+        );
+    final valid = parse('1.10.26,Move,,1.00,, cash ,TRANSFER,Bank,eur');
+    expect(valid.errors, isEmpty);
+    expect(valid.rows.single.entry.destinationId, 2);
+    expect(valid.rows.single.entry.category, 'Transfer');
+    for (final data in [
+      ('Missing,expense,,EUR', 'not found'),
+      ('Cash,other,,EUR', 'Type must'),
+      ('Cash,expense,,USD', 'Currency must be EUR'),
+      ('Cash,transfer,Cash,EUR', 'two different accounts'),
+      ('Cash,transfer,,EUR', 'two different accounts'),
+      ('Cash,expense,Bank,EUR', 'Only transfers'),
+    ]) {
+      final invalid = parse('1.10.26,Fee,Service,1.00,,${data.$1}');
+      expect(invalid.rows, isEmpty);
+      expect(
+        invalid.errors.single,
+        allOf(startsWith('Row 2:'), contains(data.$2)),
+      );
+    }
+    final duplicate = [
+      ...accounts,
+      Account(
+        id: 3,
+        name: 'cash',
+        currency: Currency.eur,
+        opening: 0,
+        asOf: DateTime(2026),
+      ),
+    ];
+    expect(
+      parse(
+        '1.10.26,Fee,Service,1.00,,Cash,expense,,EUR',
+        choices: duplicate,
+      ).errors.single,
+      contains('ambiguous'),
+    );
+    expect(
+      () =>
+          TransactionCsv.encode([valid.rows.single.entry], accounts: duplicate),
+      throwsFormatException,
+    );
+    expect(
+      () => TransactionCsv.decode(
+        utf8.encode(columns.replaceFirst('Currency', 'Type')),
+        null,
+        null,
+        accounts: accounts,
+      ),
+      throwsFormatException,
+    );
+  });
+
+  test('account-aware exports retain currency precision, names and notes', () {
+    for (final currency in Currency.values) {
+      final account = Account(
+        id: 7,
+        name: 'Bank, savings',
+        currency: currency,
+        opening: 0,
+        asOf: DateTime(2026),
+      );
+      final original = LedgerEntry(
+        type: EntryType.income,
+        amount: currency.parse(currency == Currency.iqd ? '1.234' : '1.23'),
+        currency: currency,
+        date: DateTime(2026, 10, 1),
+        description: 'Pay',
+        category: 'Salary',
+        accountId: 7,
+        notes: 'Line 1\nLine 2',
+      );
+      final preview = TransactionCsv.decode(
+        utf8.encode(TransactionCsv.encode([original], accounts: [account])),
+        null,
+        null,
+        accounts: [account],
+        currency: currency,
+      );
+      expect(preview.errors, isEmpty);
+      expect(preview.rows.single.entry.toMap(), original.toMap());
+    }
+  });
+
   group('database and screen', () {
     late LedgerStore store;
     late int account;
@@ -104,6 +249,311 @@ void main() {
       store.dispose();
     });
 
+    Future<List<LedgerEntry>> mixedEntries() async {
+      await store.addAccount(
+        Account(
+          name: 'Bank',
+          currency: Currency.eur,
+          opening: 0,
+          asOf: DateTime(2026, 1, 1),
+          includeOnAsOf: true,
+        ),
+      );
+      final bank = store.accounts.firstWhere((a) => a.name == 'Bank').id;
+      LedgerEntry row(
+        EntryType type,
+        int amount,
+        String description,
+        int? id, {
+        int? destination,
+      }) => LedgerEntry(
+        type: type,
+        amount: amount,
+        currency: Currency.eur,
+        date: DateTime(2026, 10, 1),
+        description: description,
+        category: type == EntryType.transfer ? 'Transfer' : 'CSV category',
+        accountId: id,
+        destinationId: destination,
+      );
+      return [
+        row(EntryType.expense, 2500, 'Purchase', account),
+        row(EntryType.transfer, 400, 'Move funds', account, destination: bank),
+        row(EntryType.income, 2000, 'Salary', account),
+        row(EntryType.refund, 100, 'Return', account),
+        row(EntryType.expense, 30, 'Old history', null),
+        row(EntryType.expense, 100, 'Bank fee', bank),
+      ];
+    }
+
+    test(
+      'one CSV round-trips accounts, all types, transfers and repeated imports',
+      () async {
+        final entries = await mixedEntries();
+        final csv = TransactionCsv.encode(entries, accounts: store.accounts);
+        final preview = TransactionCsv.decode(
+          utf8.encode(csv),
+          null,
+          null,
+          accounts: store.accounts,
+        );
+        expect(preview.hasAssignments, isTrue);
+        expect(preview.errors, isEmpty);
+        expect(
+          preview.rows.map((r) => r.entry.toMap()),
+          entries.map((e) => e.toMap()),
+        );
+        final result = await store.importCsv(preview.rows);
+        expect(result.imported, 6);
+        expect(store.currentBalances.byAccount[account], 200);
+        final bank = store.accounts.firstWhere((a) => a.name == 'Bank');
+        expect(store.currentBalances.byAccount[bank.id], 300);
+        expect(
+          store.entries.where((e) => e.type == EntryType.transfer),
+          hasLength(1),
+        );
+        expect(
+          store
+              .categoriesFor(EntryType.expense)
+              .any((c) => c.name == 'Transfer'),
+          isFalse,
+        );
+        final repeated = await store.importCsv(preview.rows);
+        expect(repeated.imported, 0);
+        expect(repeated.skipped, 6);
+        expect(store.entries, hasLength(6));
+      },
+    );
+
+    test(
+      'a later income cannot cover an earlier deficit in a mixed batch',
+      () async {
+        final entries = await mixedEntries();
+        final expense = entries.first;
+        final rows = [
+          CsvTransactionRow(number: 2, entry: expense),
+          CsvTransactionRow(
+            number: 3,
+            entry: LedgerEntry(
+              type: EntryType.income,
+              amount: 3000,
+              currency: Currency.eur,
+              date: DateTime(2026, 10, 2),
+              description: 'Later salary',
+              category: 'New salary',
+              accountId: account,
+            ),
+          ),
+        ];
+        await expectLater(store.importCsv(rows), throwsFormatException);
+        expect(store.entries, isEmpty);
+        expect(await store.db.query('transactions'), isEmpty);
+        expect(
+          store.categories.any(
+            (c) => c.name == expense.category || c.name == 'New salary',
+          ),
+          isFalse,
+        );
+        expect(store.currentBalances.byAccount[account], 1000);
+      },
+    );
+
+    test(
+      'mixed imports reject blocked outgoing transfers atomically',
+      () async {
+        await store.addAccount(
+          Account(
+            name: 'Blocked',
+            currency: Currency.eur,
+            opening: 5000,
+            asOf: DateTime(2026, 1, 1),
+            includeOnAsOf: true,
+            available: false,
+          ),
+        );
+        final blocked = store.accounts
+            .firstWhere((a) => a.name == 'Blocked')
+            .id;
+        final rows = [
+          CsvTransactionRow(
+            number: 2,
+            entry: LedgerEntry(
+              type: EntryType.income,
+              amount: 1000,
+              currency: Currency.eur,
+              date: DateTime(2026, 10, 1),
+              description: 'Credit',
+              category: 'CSV credit',
+              accountId: account,
+            ),
+          ),
+          CsvTransactionRow(
+            number: 3,
+            entry: LedgerEntry(
+              type: EntryType.transfer,
+              amount: 100,
+              currency: Currency.eur,
+              date: DateTime(2026, 10, 1),
+              description: 'Blocked transfer',
+              category: 'Transfer',
+              accountId: blocked,
+              destinationId: account,
+            ),
+          ),
+        ];
+        await expectLater(
+          store.importCsv(rows),
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              contains('Row 3: This account is blocked'),
+            ),
+          ),
+        );
+        expect(store.entries, isEmpty);
+        expect(store.categories.any((c) => c.name == 'CSV credit'), isFalse);
+      },
+    );
+
+    testWidgets(
+      'multiple account/type buttons export and filter a single CSV',
+      (tester) async {
+        await tester.runAsync(() async {
+          final entries = await mixedEntries();
+          await store.importCsv([
+            for (var i = 0; i < entries.length; i++)
+              CsvTransactionRow(number: i + 2, entry: entries[i]),
+          ]);
+        });
+        Uint8List? exported;
+        Uint8List? importBytes;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: CsvScreen(
+              store: store,
+              saveFile: (name, bytes) async {
+                exported = bytes;
+                return true;
+              },
+              pickFile: () async => (name: 'mixed.csv', bytes: importBytes!),
+            ),
+          ),
+        );
+        expect(find.byType(DropdownButtonFormField<int>), findsNothing);
+        await selectCsvCard(tester, 'csv-account', 'unassigned');
+        await selectCsvCard(tester, 'csv-type', 'refund');
+        await tester.tap(find.text('Export CSV'));
+        await tester.pumpAndSettle();
+        importBytes = exported;
+        final output = TransactionCsv.decode(
+          exported!,
+          null,
+          null,
+          accounts: store.accounts,
+        );
+        expect(output.errors, isEmpty);
+        expect(output.rows, hasLength(4));
+        expect(output.rows.map((r) => r.entry.type).toSet(), {
+          EntryType.expense,
+          EntryType.income,
+          EntryType.transfer,
+        });
+        final bank = store.accounts.firstWhere((a) => a.name == 'Bank').id!;
+        await selectCsvCard(tester, 'csv-account', '$account');
+        await tester.tap(find.text('Export CSV'));
+        await tester.pumpAndSettle();
+        final bankOnly = TransactionCsv.decode(
+          exported!,
+          null,
+          null,
+          accounts: store.accounts,
+        );
+        expect(bankOnly.rows.map((r) => r.entry.description).toSet(), {
+          'Bank fee',
+          'Move funds',
+        });
+        await selectCsvCard(tester, 'csv-account', '$account');
+        expect(output.rows.map((r) => r.entry.accountId).toSet(), {
+          account,
+          bank,
+        });
+        // Filtering out Bank excludes its expense, but keeps Cash's transfer intact.
+        await selectCsvCard(tester, 'csv-account', '$bank');
+        await tester.runAsync(() async {
+          await tester.tap(find.text('Choose CSV'));
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+        });
+        await tester.pumpAndSettle();
+        expect(find.textContaining('3 valid rows'), findsOneWidget);
+        await selectCsvCard(tester, 'csv-type', 'expense');
+        expect(find.textContaining('2 valid rows'), findsOneWidget);
+        await tester.runAsync(() async {
+          await tester.tap(find.text('Import transactions'));
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+        });
+        await tester.pumpAndSettle();
+        expect(
+          find.text('Imported 0 transactions. Skipped 2 existing matches.'),
+          findsOneWidget,
+        );
+        expect(store.entries, hasLength(6));
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      'older files require one explicit account and type assignment',
+      (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: CsvScreen(
+              store: store,
+              pickFile: () async => (
+                name: 'older.csv',
+                bytes: Uint8List.fromList(
+                  utf8.encode('${header}1.10.26,Fee,Service,1.00,'),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.runAsync(() async {
+          await tester.tap(find.text('Choose CSV'));
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+        });
+        await tester.pumpAndSettle();
+        expect(
+          find.textContaining('This older CSV has no account or type columns.'),
+          findsOneWidget,
+        );
+        expect(
+          tester
+              .widget<FilledButton>(
+                find.widgetWithText(FilledButton, 'Import transactions'),
+              )
+              .onPressed,
+          isNull,
+        );
+        await legacyDefaults(tester);
+        expect(find.textContaining('1 valid rows'), findsOneWidget);
+        expect(
+          find.textContaining('This older CSV has no account or type columns.'),
+          findsNothing,
+        );
+        expect(
+          tester
+              .widget<FilledButton>(
+                find.widgetWithText(FilledButton, 'Import transactions'),
+              )
+              .onPressed,
+          isNotNull,
+        );
+        expect(store.entries, isEmpty);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
     testWidgets(
       'import success is visible after scrolling through a long preview',
       (tester) async {
@@ -124,6 +574,7 @@ void main() {
             ),
           ),
         );
+        await legacyDefaults(tester);
         await tester.runAsync(() async {
           await tester.tap(find.text('Choose CSV'));
           await Future<void>.delayed(const Duration(milliseconds: 300));
@@ -311,6 +762,7 @@ void main() {
             ),
           ),
         );
+        await legacyDefaults(tester);
         await tester.runAsync(() async {
           await tester.tap(find.text('Choose CSV'));
           await Future<void>.delayed(const Duration(milliseconds: 300));

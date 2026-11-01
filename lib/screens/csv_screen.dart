@@ -5,7 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../core/presentation/entry_type_picker.dart';
+import '../core/presentation/selection_cards.dart';
 
 import '../core/data/ledger_store.dart';
 import '../core/data/transaction_csv.dart';
@@ -42,13 +42,46 @@ Future<bool> saveCsvFile(String name, Uint8List bytes) async =>
     null;
 
 CsvPreview _decodeCsv(
-  ({Uint8List bytes, EntryType? type, int? accountId, Currency currency}) input,
-) => TransactionCsv.decode(
-  input.bytes,
-  input.type,
-  input.accountId,
-  currency: input.currency,
-);
+  ({
+    Uint8List bytes,
+    Set<EntryType> types,
+    Set<int?> accountIds,
+    List<Account> accounts,
+    Currency currency,
+  })
+  input,
+) {
+  final parsed = TransactionCsv.decode(
+    input.bytes,
+    input.types.length == 1 ? input.types.single : null,
+    input.accountIds.length == 1 ? input.accountIds.single : null,
+    currency: input.currency,
+    accounts: input.accounts,
+  );
+  if (input.types.isEmpty || input.accountIds.isEmpty) {
+    return CsvPreview([], [
+      'Select at least one account and transaction type.',
+    ], hasAssignments: parsed.hasAssignments);
+  }
+  if (!parsed.hasAssignments &&
+      (input.types.length != 1 || input.accountIds.length != 1)) {
+    return const CsvPreview([], [
+      'This older CSV has no account or type columns. Select one account and one transaction type to assign its rows.',
+    ]);
+  }
+  return CsvPreview(
+    [
+      for (final row in parsed.rows)
+        if (input.types.contains(row.entry.type) &&
+            (input.accountIds.contains(row.entry.accountId) ||
+                row.entry.type == EntryType.transfer &&
+                    input.accountIds.contains(row.entry.destinationId)))
+          row,
+    ],
+    parsed.errors,
+    hasAssignments: parsed.hasAssignments,
+  );
+}
 
 class CsvScreen extends StatefulWidget {
   const CsvScreen({
@@ -72,8 +105,11 @@ class _CsvScreenState extends State<CsvScreen> {
     super.dispose();
   }
 
-  EntryType? type;
-  int? accountId;
+  final types = EntryType.values.toSet();
+  late final accountIds = <int?>{
+    null,
+    ...widget.store.accounts.map((a) => a.id),
+  };
   bool busy = false;
   bool skipExisting = true;
   CsvFile? file;
@@ -108,8 +144,9 @@ class _CsvScreenState extends State<CsvScreen> {
     final parsed = await compute(_decodeCsv, (
       bytes: file!.bytes,
       currency: widget.store.currency,
-      type: type,
-      accountId: accountId,
+      types: {...types},
+      accountIds: {...accountIds},
+      accounts: widget.store.accounts,
     ));
     if (mounted) setState(() => preview = parsed);
   }
@@ -130,19 +167,25 @@ class _CsvScreenState extends State<CsvScreen> {
             .where(
               (e) =>
                   e.currency == widget.store.currency &&
-                  e.type == (type ?? EntryType.expense) &&
-                  e.accountId == accountId,
+                  types.contains(e.type) &&
+                  (accountIds.contains(e.accountId) ||
+                      e.type == EntryType.transfer &&
+                          accountIds.contains(e.destinationId)),
             )
             .toList()
           ..sort((a, b) => a.date.compareTo(b.date));
     if (entries.isEmpty) {
       throw const FormatException(
-        'No transactions for this account and type to export.',
+        'No transactions match the selected accounts and types.',
       );
     }
     final saved = await widget.saveFile(
-      'moneva_${(type ?? EntryType.expense).name}_${accountId ?? 'unassigned'}_${dayKey(DateTime.now())}.csv',
-      Uint8List.fromList(utf8.encode(TransactionCsv.encode(entries))),
+      'paxlee_transactions_${dayKey(DateTime.now())}.csv',
+      Uint8List.fromList(
+        utf8.encode(
+          TransactionCsv.encode(entries, accounts: widget.store.accounts),
+        ),
+      ),
     );
     if (mounted && saved) {
       setState(
@@ -180,6 +223,77 @@ class _CsvScreenState extends State<CsvScreen> {
     }
   });
 
+  String _accountName(int? id) => id == null
+      ? 'Unassigned'
+      : widget.store.accounts.where((a) => a.id == id).firstOrNull?.name ??
+            'Unknown account';
+
+  String _typeName(EntryType type) =>
+      '${type.name[0].toUpperCase()}${type.name.substring(1)}';
+
+  Widget _selectionGroup<T>({
+    required String label,
+    required String allLabel,
+    required String keyPrefix,
+    required List<T> options,
+    required Set<T> selected,
+    required String Function(T) title,
+    required IconData Function(T) icon,
+  }) {
+    final allSelected = options.every(selected.contains);
+    void change(VoidCallback update) {
+      setState(() {
+        update();
+        error = null;
+        result = null;
+      });
+      if (file != null) run(parse);
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: Theme.of(context).textTheme.labelLarge),
+        const SizedBox(height: 8),
+        SelectionRow(
+          key: ValueKey('$keyPrefix-options'),
+          count: options.length + 1,
+          itemBuilder: (context, index) {
+            if (index == 0) {
+              return SelectionCard(
+                key: ValueKey('$keyPrefix-all'),
+                selected: allSelected,
+                icon: Icons.select_all,
+                title: allLabel,
+                onTap: busy
+                    ? null
+                    : () => change(() {
+                        selected.clear();
+                        if (!allSelected) selected.addAll(options);
+                      }),
+              );
+            }
+            final value = options[index - 1];
+            final key = value is EntryType
+                ? value.name
+                : value?.toString() ?? 'unassigned';
+            return SelectionCard(
+              key: ValueKey('$keyPrefix-$key'),
+              selected: selected.contains(value),
+              icon: icon(value),
+              title: title(value),
+              onTap: busy
+                  ? null
+                  : () => change(() {
+                      if (!selected.add(value)) selected.remove(value);
+                    }),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
@@ -191,7 +305,7 @@ class _CsvScreenState extends State<CsvScreen> {
         actions: const [
           InfoButton(
             title: 'CSV import and export',
-            message: 'Date · Details · Category · Cost · Notes more info Example: 1.10.26, Bank Fee, Service, 4.95.  Account and type are optional. Unassigned expenses count in transactions and reports without changing account balances.  Leaving the type unset treats rows as expenses. All dates are included in exports.  Transfers require two accounts and are not supported by this five-column format. Skip existing matches compares date, details, category, cost, notes, type and account; repeated purchases within a file are preserved. Missing categories receive a general icon. Import updates balances using normal account rules; dates before the opening balance count as history.',
+            message: 'Select multiple accounts and transaction types to export them together or filter an import. Each exported row includes Account, Type, Destination account and Currency alongside Date, Details, Category, Cost and Notes more info. Account names must match accounts already in the app; blank Account means Unassigned. Transfers include both accounts, match either selected account and are exported once. Older five-column files require selecting exactly one account and type to assign their rows. All dates are included. Imports are atomic and use normal balance, blocked-account and currency rules. Skip existing matches preserves repeated purchases. CSV does not include opening balances, receipts or settings.',
           ),
         ],
       ),
@@ -210,6 +324,8 @@ class _CsvScreenState extends State<CsvScreen> {
                 title: Text('${formatInteger(row.number)}. ${e.description}'),
                 subtitle: Text(
                   '${dayKey(e.date)} · ${e.category}'
+                  '\n${_typeName(e.type)} \u00b7 ${_accountName(e.accountId)}'
+                  '${e.destinationId == null ? '' : ' -> ${_accountName(e.destinationId)}'}'
                   '${e.notes.isEmpty ? '' : '\n${e.notes}'}${rowError ? '\n$error' : ''}',
                 ),
                 trailing: Text(
@@ -221,39 +337,36 @@ class _CsvScreenState extends State<CsvScreen> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              DropdownButtonFormField<int>(
-                initialValue: accountId,
-                hint: const Text('Unassigned (payment unknown)'),
-                decoration: const InputDecoration(labelText: 'Account'),
-                items: [
-                  const DropdownMenuItem<int>(
-                    value: null,
-                    child: Text('Unassigned (payment unknown)'),
-                  ),
-                  for (final a in widget.store.accounts)
-                    DropdownMenuItem(value: a.id, child: Text(a.name)),
-                ],
-                onChanged: busy
-                    ? null
-                    : (value) {
-                        accountId = value;
-                        run(parse);
-                      },
+              _selectionGroup<int?>(
+                label: 'Accounts',
+                allLabel: 'All accounts',
+                keyPrefix: 'csv-account',
+                options: [...widget.store.accounts.map((a) => a.id), null],
+                selected: accountIds,
+                title: (id) => _accountName(id),
+                icon: (id) => id == null
+                    ? Icons.help_outline
+                    : widget.store.accounts
+                              .firstWhere((a) => a.id == id)
+                              .kind ==
+                          AccountKind.cash
+                    ? Icons.payments_outlined
+                    : Icons.account_balance_outlined,
               ),
               const SizedBox(height: 12),
-              EntryTypePicker(
-                value: type ?? EntryType.expense,
-                types: const [
-                  EntryType.expense,
-                  EntryType.income,
-                  EntryType.refund,
-                ],
-                onChanged: busy
-                    ? null
-                    : (value) {
-                        type = value;
-                        run(parse);
-                      },
+              _selectionGroup<EntryType>(
+                label: 'Transaction types',
+                allLabel: 'All types',
+                keyPrefix: 'csv-type',
+                options: EntryType.values,
+                selected: types,
+                title: (type) => _typeName(type),
+                icon: (type) => switch (type) {
+                  EntryType.expense => Icons.shopping_bag_outlined,
+                  EntryType.income => Icons.payments_outlined,
+                  EntryType.refund => Icons.undo,
+                  EntryType.transfer => Icons.swap_horiz,
+                },
               ),
               const SizedBox(height: 16),
               Wrap(
@@ -314,10 +427,12 @@ class _CsvScreenState extends State<CsvScreen> {
                   '${formatInteger(rows.length)} valid rows · ${widget.store.currency.symbol}${widget.store.currency.formatGrouped(rows.fold<int>(0, (total, row) => total + row.entry.amount))}',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
+                if (rows.isEmpty && data.errors.isEmpty)
+                  const Text('No rows match the selected accounts and types.'),
                 if (data.errors.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Text(
-                    'Correct these rows in the CSV and choose the file again:',
+                    'Review the following before importing:',
                     style: TextStyle(color: colors.error),
                   ),
                   for (final message in data.errors)

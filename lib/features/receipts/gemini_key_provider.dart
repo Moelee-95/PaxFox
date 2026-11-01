@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:cryptography/cryptography.dart';
 import 'package:http/http.dart' as http;
 
+import '../../core/domain/app_failure.dart';
+
 class GeminiKeyProvider {
   static const String configUrl =
       'https://alhayali.de/card_lens/gemini-config.json';
@@ -40,7 +42,10 @@ class GeminiKeyProvider {
 
       if (response.statusCode != 200) {
         throw GeminiKeyException(
-          'Key service returned status ${response.statusCode}.',
+          AppFailure.serviceMessage(
+            response.statusCode,
+            'Invoice connection service',
+          ),
         );
       }
 
@@ -69,10 +74,12 @@ class GeminiKeyProvider {
       return apiKey;
     } on GeminiKeyException {
       rethrow;
-    } catch (_) {
-      throw const GeminiKeyException(
-        'Unable to load the Gemini configuration. Check your connection and '
-        'try again.',
+    } catch (error) {
+      throw GeminiKeyException(
+        AppFailure.messageFor(
+          error,
+          fallback: 'Unable to load the Gemini configuration. Please try again later.',
+        ),
       );
     } finally {
       if (ownsClient) requestClient.close();
@@ -88,11 +95,6 @@ class GeminiKeyProvider {
   }
 }
 
-class GeminiKeyException implements Exception {
-  const GeminiKeyException(this.message);
-
-  final String message;
-
-  @override
-  String toString() => message;
+class GeminiKeyException extends AppFailure {
+  const GeminiKeyException(super.message);
 }

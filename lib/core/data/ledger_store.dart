@@ -30,9 +30,14 @@ class LedgerStore extends ChangeNotifier {
   List<LedgerCategory> categoriesFor(EntryType type) =>
       _categoriesByKind[categoryKind(type)] ?? const [];
 
+  LedgerCategory? categoryFor(String name, EntryType type) =>
+      _categoriesByName[(categoryKind(type), name)];
+
   CategoryIcon iconFor(LedgerEntry entry) =>
-      _categoriesByName[(categoryKind(entry.type), entry.category)]?.icon ??
-      CategoryIcon.general;
+      categoryFor(entry.category, entry.type)?.icon ?? CategoryIcon.general;
+
+  int? colorFor(LedgerEntry entry) =>
+      categoryFor(entry.category, entry.type)?.color;
 
   MonthlyLedger monthSummary(DateTime month) => _ledger.forMonth(month);
 
@@ -59,6 +64,22 @@ class LedgerStore extends ChangeNotifier {
   int get totalDebt => debts.fold(0, (sum, debt) => sum + debt.amount);
   int get netWealth => currentBalances.wealth - totalDebt;
   int invoiceTimeoutSeconds = 180;
+  String _profileName = '';
+  String get profileName => _profileName;
+  String _profileEmail = '';
+  String get profileEmail => _profileEmail;
+  bool _snapshotNeedsRefresh = false;
+  bool get snapshotNeedsRefresh => _snapshotNeedsRefresh;
+
+  Future<void> _refreshAfterWrite() async {
+    try {
+      await refresh();
+    } catch (_) {
+      // The commit succeeded. Retrying the write could duplicate a payment.
+      _snapshotNeedsRefresh = true;
+      notifyListeners();
+    }
+  }
 
   Future<void> saveInvoiceTimeout(int seconds) async {
     if (seconds < 30 || seconds > 900) {
@@ -68,7 +89,35 @@ class LedgerStore extends ChangeNotifier {
       'key': 'invoice_timeout_seconds',
       'value': '$seconds',
     }, conflictAlgorithm: ConflictAlgorithm.replace);
-    await refresh();
+    await _refreshAfterWrite();
+  }
+
+  Future<void> saveProfile({
+    required String name,
+    required String email,
+  }) async {
+    final trimmedName = name.trim();
+    final trimmedEmail = email.trim();
+    if (trimmedName.isEmpty || trimmedName.length > 80) {
+      throw ArgumentError('Enter a name with up to 80 characters.');
+    }
+    if (trimmedEmail.length > 254 ||
+        (trimmedEmail.isNotEmpty &&
+            !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(trimmedEmail))) {
+      throw ArgumentError('Enter a valid email address or leave it empty.');
+    }
+    await db.transaction((txn) async {
+      for (final setting in {
+        'profile_name': trimmedName,
+        'profile_email': trimmedEmail,
+      }.entries) {
+        await txn.insert('settings', {
+          'key': setting.key,
+          'value': setting.value,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
+    await _refreshAfterWrite();
   }
 
   List<RecurringRule> _recurringRules = const [];
@@ -82,8 +131,14 @@ class LedgerStore extends ChangeNotifier {
   }) async {
     final db = await LedgerDatabase.open(path: path, factory: factory);
     final store = LedgerStore(db);
-    await store.refresh();
-    return store;
+    try {
+      await store.refresh();
+      return store;
+    } catch (_) {
+      store.dispose();
+      await db.close();
+      rethrow;
+    }
   }
 
   Future<void> refresh() async {
@@ -161,6 +216,8 @@ class LedgerStore extends ChangeNotifier {
         'AND NOT EXISTS (SELECT 1 FROM recurring_occurrences o WHERE o.account_id = a.id)',
       )).map((row) => row['id'] as int).toSet();
       return (
+        profileName: settingsByKey['profile_name'] ?? '',
+        profileEmail: settingsByKey['profile_email'] ?? '',
         deletableBankIds: deletableBankIds,
         currency: activeCurrency,
         debts: debtList,
@@ -176,6 +233,8 @@ class LedgerStore extends ChangeNotifier {
       );
     });
     _currency = snapshot.currency;
+    _profileName = snapshot.profileName;
+    _profileEmail = snapshot.profileEmail;
     _debts = List.unmodifiable(snapshot.debts);
     invoiceTimeoutSeconds = snapshot.timeout;
     _receiptTransactionIds = Set.unmodifiable(snapshot.receiptIds);
@@ -196,6 +255,7 @@ class LedgerStore extends ChangeNotifier {
     _accounts = List.unmodifiable(snapshot.accounts);
     _deletableBankIds = Set.unmodifiable(snapshot.deletableBankIds);
     _balances = null;
+    _snapshotNeedsRefresh = false;
     notifyListeners();
   }
 
@@ -224,7 +284,7 @@ class LedgerStore extends ChangeNotifier {
         );
       }
     });
-    await refresh();
+    await _refreshAfterWrite();
   }
 
   /// Imports the whole file atomically, including any new categories.
@@ -251,6 +311,7 @@ class LedgerStore extends ChangeNotifier {
       final categories = (await txn.query('categories'))
           .map(LedgerCategory.fromMap)
           .toList();
+      final affectedRows = <int, int>{};
       final ordered = [...rows]
         ..sort((a, b) {
           final date = a.entry.date.compareTo(b.entry.date);
@@ -259,33 +320,37 @@ class LedgerStore extends ChangeNotifier {
       for (final row in ordered) {
         try {
           final source = row.entry;
-          if (source.id != null || source.type == EntryType.transfer) {
-            throw ArgumentError('Choose an expense, income or refund type.');
+          if (source.id != null) {
+            throw ArgumentError('CSV imports create new transactions.');
           }
-          final kind = categoryKind(source.type);
-          var category = categories
-              .where(
-                (c) =>
-                    c.kind == kind &&
-                    c.name.toLowerCase() ==
-                        source.category.trim().toLowerCase(),
-              )
-              .firstOrNull;
-          if (category == null) {
-            if (source.category.trim().isEmpty) {
-              throw ArgumentError('Category is required.');
+          var categoryName = 'Transfer';
+          if (source.type != EntryType.transfer) {
+            final kind = categoryKind(source.type);
+            var category = categories
+                .where(
+                  (c) =>
+                      c.kind == kind &&
+                      c.name.toLowerCase() ==
+                          source.category.trim().toLowerCase(),
+                )
+                .firstOrNull;
+            if (category == null) {
+              if (source.category.trim().isEmpty) {
+                throw ArgumentError('Category is required.');
+              }
+              final id = await txn.insert('categories', {
+                'kind': kind.name,
+                'name': source.category.trim(),
+                'icon': 'general',
+              });
+              category = LedgerCategory(
+                id: id,
+                name: source.category.trim(),
+                kind: kind,
+              );
+              categories.add(category);
             }
-            final id = await txn.insert('categories', {
-              'kind': kind.name,
-              'name': source.category.trim(),
-              'icon': 'general',
-            });
-            category = LedgerCategory(
-              id: id,
-              name: source.category.trim(),
-              kind: kind,
-            );
-            categories.add(category);
+            categoryName = category.name;
           }
           final entry = LedgerEntry(
             type: source.type,
@@ -293,8 +358,9 @@ class LedgerStore extends ChangeNotifier {
             currency: source.currency,
             date: source.date,
             description: source.description,
-            category: category.name,
+            category: categoryName,
             accountId: source.accountId,
+            destinationId: source.destinationId,
             notes: source.notes,
           );
           final key = signature(entry);
@@ -303,14 +369,34 @@ class LedgerStore extends ChangeNotifier {
             skipped++;
             continue;
           }
-          await _writeEntry(txn, entry, allowUnassigned: true);
+          await _writeEntry(
+            txn,
+            entry,
+            allowUnassigned: true,
+            checkFunds: false,
+          );
+          for (final id in [
+            entry.accountId,
+            entry.destinationId,
+          ].whereType<int>()) {
+            affectedRows[id] = row.number;
+          }
           imported++;
         } on ArgumentError catch (e) {
           throw FormatException('Row ${row.number}: ${e.message}');
         }
       }
+      // Validate the complete batch by ledger day. Same-day income/transfers
+      // may fund expenses regardless of CSV row order; later days cannot.
+      for (final affected in affectedRows.entries) {
+        try {
+          await _checkFunds(txn, [affected.key]);
+        } on ArgumentError catch (e) {
+          throw FormatException('Row ${affected.value}: ${e.message}');
+        }
+      }
     });
-    await refresh();
+    await _refreshAfterWrite();
     return (imported: imported, skipped: skipped);
   }
 
@@ -494,7 +580,7 @@ class LedgerStore extends ChangeNotifier {
       }
       await _checkFunds(txn, affected);
     });
-    await refresh();
+    await _refreshAfterWrite();
   }
 
   Future<void> deleteEntries(Set<int> ids) async {
@@ -559,13 +645,13 @@ class LedgerStore extends ChangeNotifier {
     if (imagePaths.isNotEmpty) {
       await InvoiceImages().remove(imagePaths);
     }
-    await refresh();
+    await _refreshAfterWrite();
   }
 
   Future<void> addAccount(Account account) async {
     _validateAccount(account);
     await db.insert('accounts', account.toMap());
-    await refresh();
+    await _refreshAfterWrite();
   }
 
   static Future<bool> _canDeleteBankAccount(
@@ -612,7 +698,7 @@ class LedgerStore extends ChangeNotifier {
       }
       await txn.delete('accounts', where: 'id = ?', whereArgs: [id]);
     });
-    await refresh();
+    await _refreshAfterWrite();
   }
 
   void _validateAccount(Account account, {Currency? selectedCurrency}) {
@@ -647,7 +733,7 @@ class LedgerStore extends ChangeNotifier {
       }
       await _checkFunds(txn, [account.id!]);
     });
-    await refresh();
+    await _refreshAfterWrite();
   }
 
   static Future<void> _checkFunds(
@@ -760,7 +846,7 @@ class LedgerStore extends ChangeNotifier {
         'value': 'true',
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     });
-    await refresh();
+    await _refreshAfterWrite();
   }
 
   static void _validateDebt(Debt debt, Currency expected) {
@@ -798,12 +884,12 @@ class LedgerStore extends ChangeNotifier {
   Future<void> saveDebt(Debt debt) async {
     _validateDebt(debt, currency);
     await db.transaction((txn) => _writeDebt(txn, debt));
-    await refresh();
+    await _refreshAfterWrite();
   }
 
   Future<void> deleteDebt(int id) async {
     await db.delete('debts', where: 'id = ?', whereArgs: [id]);
-    await refresh();
+    await _refreshAfterWrite();
   }
 
   Future<void> saveCategory({
@@ -811,7 +897,11 @@ class LedgerStore extends ChangeNotifier {
     required CategoryKind kind,
     required String name,
     CategoryIcon? icon,
+    int? color,
   }) async {
+    if (color != null && (color < 0xff000000 || color > 0xffffffff)) {
+      throw ArgumentError('Choose an opaque category color.');
+    }
     final trimmed = name.trim();
     if (trimmed.isEmpty || trimmed.length > 80) {
       throw ArgumentError('Use a category name between 1 and 80 characters.');
@@ -832,6 +922,7 @@ class LedgerStore extends ChangeNotifier {
           'kind': kind.name,
           'name': trimmed,
           'icon': (icon ?? CategoryIcon.general).name,
+          'color': color,
         });
       } else {
         final old = await txn.query(
@@ -844,10 +935,17 @@ class LedgerStore extends ChangeNotifier {
         }
         await txn.update(
           'categories',
-          {'name': trimmed, if (icon != null) 'icon': icon.name},
+          {
+            'name': trimmed,
+            if (icon != null) 'icon': icon.name,
+            'color': ?color,
+          },
           where: 'id = ?',
           whereArgs: [id],
         );
+        // Icon/color edits do not rename entries. Avoid rewriting every matching
+        // transaction and decoding every legacy receipt for appearance changes.
+        if (old.single['name'] == trimmed) return;
         await txn.update(
           'transactions',
           {
@@ -895,7 +993,7 @@ class LedgerStore extends ChangeNotifier {
         }
       }
     });
-    await refresh();
+    await _refreshAfterWrite();
   }
 
   Future<void> saveRecurring(RecurringRule rule, {DateTime? today}) async {
@@ -1009,7 +1107,7 @@ class LedgerStore extends ChangeNotifier {
       where: 'id = ?',
       whereArgs: [id],
     );
-    await refresh();
+    await _refreshAfterWrite();
   }
 
   Future<void> _postOccurrence(
@@ -1136,7 +1234,7 @@ class LedgerStore extends ChangeNotifier {
         );
       }
     });
-    await refresh();
+    await _refreshAfterWrite();
   }
 
   Future<void> retryRecurring(int id, {DateTime? paidOn}) async {
@@ -1147,7 +1245,7 @@ class LedgerStore extends ChangeNotifier {
         paymentDate: dateOnly(paidOn ?? DateTime.now()),
       ),
     );
-    await refresh();
+    await _refreshAfterWrite();
   }
 
   Future<void> skipRecurring(int id) async {
@@ -1157,7 +1255,7 @@ class LedgerStore extends ChangeNotifier {
       where: "id = ? AND status = 'failed'",
       whereArgs: [id],
     );
-    await refresh();
+    await _refreshAfterWrite();
   }
 
   Future<Map<String, Object?>?> scannedInvoiceFor(int transactionId) async =>
@@ -1232,7 +1330,7 @@ class LedgerStore extends ChangeNotifier {
       }
       await _checkFunds(txn, [accountId]);
     });
-    await refresh();
+    await _refreshAfterWrite();
   }
 
   Future<Map<String, Object?>?> receiptFor(int id) async => (await db.query(
@@ -1325,6 +1423,6 @@ class LedgerStore extends ChangeNotifier {
         });
       }
     });
-    await refresh();
+    await _refreshAfterWrite();
   }
 }

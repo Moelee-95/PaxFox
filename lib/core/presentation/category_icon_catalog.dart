@@ -1,6 +1,22 @@
 import '../domain/category.dart';
 
 String categoryIconLabel(CategoryIcon icon) => switch (icon) {
+  CategoryIcon.netflix => 'Netflix',
+  CategoryIcon.youtube => 'YouTube',
+  CategoryIcon.spotify => 'Spotify',
+  CategoryIcon.apple => 'Apple',
+  CategoryIcon.google => 'Google',
+  CategoryIcon.tiktok => 'TikTok',
+  CategoryIcon.instagram => 'Instagram',
+  CategoryIcon.facebook => 'Facebook',
+  CategoryIcon.xTwitter => 'X / Twitter',
+  CategoryIcon.twitch => 'Twitch',
+  CategoryIcon.linkedin => 'LinkedIn',
+  CategoryIcon.github => 'GitHub',
+  CategoryIcon.amazon => 'Amazon',
+  CategoryIcon.discord => 'Discord',
+  CategoryIcon.uber => 'Uber',
+  CategoryIcon.airbnb => 'Airbnb',
   CategoryIcon.wallet => 'Wallet',
   CategoryIcon.bank => 'Bank',
   CategoryIcon.cash => 'Cash',
@@ -78,7 +94,22 @@ String categoryIconLabel(CategoryIcon icon) => switch (icon) {
   _ => '${icon.name[0].toUpperCase()}${icon.name.substring(1)}',
 };
 
+const categoryIconGroups = [
+  'Finance',
+  'Shopping',
+  'Food and Lifestyle',
+  'Transport and Travel',
+  'Home and Family',
+  'Health and Work',
+  'Utilities and Devices',
+  'Brands and Streaming',
+  'Misc',
+];
+
 String categoryIconGroup(CategoryIcon icon) => switch (icon) {
+  CategoryIcon.salary ||
+  CategoryIcon.investments ||
+  CategoryIcon.savings ||
   CategoryIcon.wallet ||
   CategoryIcon.bank ||
   CategoryIcon.cash ||
@@ -89,8 +120,15 @@ String categoryIconGroup(CategoryIcon icon) => switch (icon) {
   CategoryIcon.refund ||
   CategoryIcon.transfer ||
   CategoryIcon.budget ||
-  CategoryIcon.coins ||
-  CategoryIcon.business => 'Finance',
+  CategoryIcon.coins => 'Finance',
+  CategoryIcon.shopping ||
+  CategoryIcon.groceries ||
+  CategoryIcon.clothing ||
+  CategoryIcon.beauty ||
+  CategoryIcon.jewelry ||
+  CategoryIcon.store ||
+  CategoryIcon.gifts => 'Shopping',
+  CategoryIcon.dining ||
   CategoryIcon.coffee ||
   CategoryIcon.bakery ||
   CategoryIcon.fastFood ||
@@ -98,15 +136,17 @@ String categoryIconGroup(CategoryIcon icon) => switch (icon) {
   CategoryIcon.bar ||
   CategoryIcon.iceCream ||
   CategoryIcon.fruit ||
-  CategoryIcon.breakfast => 'Food',
-  CategoryIcon.clothing ||
-  CategoryIcon.electronics ||
-  CategoryIcon.phone ||
-  CategoryIcon.computer ||
-  CategoryIcon.furniture ||
-  CategoryIcon.beauty ||
-  CategoryIcon.jewelry ||
-  CategoryIcon.store => 'Shopping',
+  CategoryIcon.breakfast ||
+  CategoryIcon.entertainment ||
+  CategoryIcon.music ||
+  CategoryIcon.gaming ||
+  CategoryIcon.sports ||
+  CategoryIcon.camera ||
+  CategoryIcon.art ||
+  CategoryIcon.concert ||
+  CategoryIcon.celebration => 'Food and Lifestyle',
+  CategoryIcon.transport ||
+  CategoryIcon.travel ||
   CategoryIcon.car ||
   CategoryIcon.fuel ||
   CategoryIcon.train ||
@@ -114,17 +154,21 @@ String categoryIconGroup(CategoryIcon icon) => switch (icon) {
   CategoryIcon.taxi ||
   CategoryIcon.parking ||
   CategoryIcon.boat ||
-  CategoryIcon.scooter => 'Transport',
+  CategoryIcon.scooter ||
+  CategoryIcon.hotel ||
+  CategoryIcon.beach ||
+  CategoryIcon.camping => 'Transport and Travel',
+  CategoryIcon.home ||
   CategoryIcon.rent ||
-  CategoryIcon.electricity ||
-  CategoryIcon.water ||
-  CategoryIcon.heating ||
-  CategoryIcon.internet ||
-  CategoryIcon.phoneBill ||
-  CategoryIcon.repairs ||
-  CategoryIcon.cleaning ||
+  CategoryIcon.furniture ||
+  CategoryIcon.pets ||
+  CategoryIcon.education ||
+  CategoryIcon.family ||
+  CategoryIcon.childcare ||
   CategoryIcon.garden ||
-  CategoryIcon.laundry => 'Home & bills',
+  CategoryIcon.cleaning ||
+  CategoryIcon.wedding => 'Home and Family',
+  CategoryIcon.health ||
   CategoryIcon.medical ||
   CategoryIcon.pharmacy ||
   CategoryIcon.dentist ||
@@ -132,41 +176,38 @@ String categoryIconGroup(CategoryIcon icon) => switch (icon) {
   CategoryIcon.spa ||
   CategoryIcon.vision ||
   CategoryIcon.hospital ||
-  CategoryIcon.wellbeing => 'Health',
-  CategoryIcon.music ||
-  CategoryIcon.gaming ||
-  CategoryIcon.books ||
-  CategoryIcon.sports ||
-  CategoryIcon.camera ||
-  CategoryIcon.art ||
-  CategoryIcon.concert ||
-  CategoryIcon.hotel ||
-  CategoryIcon.beach ||
-  CategoryIcon.camping => 'Leisure',
-  CategoryIcon.family ||
-  CategoryIcon.childcare ||
-  CategoryIcon.charity ||
-  CategoryIcon.celebration ||
-  CategoryIcon.wedding ||
-  CategoryIcon.security ||
-  CategoryIcon.mail ||
-  CategoryIcon.time ||
-  CategoryIcon.workTools ||
-  CategoryIcon.language => 'Personal',
-  CategoryIcon.general => 'Personal',
-  CategoryIcon.groceries || CategoryIcon.dining => 'Food',
-  CategoryIcon.transport || CategoryIcon.travel => 'Transport',
-  CategoryIcon.home ||
-  CategoryIcon.insurance ||
-  CategoryIcon.subscriptions => 'Home & bills',
-  CategoryIcon.health => 'Health',
-  CategoryIcon.shopping => 'Shopping',
-  CategoryIcon.entertainment => 'Leisure',
-  CategoryIcon.education ||
-  CategoryIcon.gifts ||
-  CategoryIcon.pets => 'Personal',
-  CategoryIcon.salary ||
+  CategoryIcon.wellbeing ||
   CategoryIcon.freelance ||
-  CategoryIcon.investments ||
-  CategoryIcon.savings => 'Finance',
+  CategoryIcon.business ||
+  CategoryIcon.repairs ||
+  CategoryIcon.workTools ||
+  CategoryIcon.charity => 'Health and Work',
+  CategoryIcon.electronics ||
+  CategoryIcon.phone ||
+  CategoryIcon.computer ||
+  CategoryIcon.electricity ||
+  CategoryIcon.water ||
+  CategoryIcon.heating ||
+  CategoryIcon.internet ||
+  CategoryIcon.phoneBill ||
+  CategoryIcon.laundry ||
+  CategoryIcon.books ||
+  CategoryIcon.subscriptions => 'Utilities and Devices',
+  CategoryIcon.netflix ||
+  CategoryIcon.youtube ||
+  CategoryIcon.spotify ||
+  CategoryIcon.apple ||
+  CategoryIcon.google ||
+  CategoryIcon.tiktok ||
+  CategoryIcon.instagram ||
+  CategoryIcon.facebook ||
+  CategoryIcon.xTwitter ||
+  CategoryIcon.twitch ||
+  CategoryIcon.linkedin ||
+  CategoryIcon.github ||
+  CategoryIcon.amazon ||
+  CategoryIcon.discord ||
+  CategoryIcon.uber ||
+  CategoryIcon.airbnb => 'Brands and Streaming',
+  _ => 'Misc',
 };

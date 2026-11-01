@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 import '../domain/category.dart';
 import '../domain/ledger.dart';
@@ -96,7 +97,42 @@ IconData categoryIconData(CategoryIcon icon) => switch (icon) {
   CategoryIcon.time => Icons.schedule,
   CategoryIcon.workTools => Icons.construction_outlined,
   CategoryIcon.language => Icons.translate,
+  CategoryIcon.netflix => FontAwesomeIcons.n.data,
+  CategoryIcon.youtube => FontAwesomeIcons.youtube.data,
+  CategoryIcon.spotify => FontAwesomeIcons.spotify.data,
+  CategoryIcon.apple => FontAwesomeIcons.apple.data,
+  CategoryIcon.google => FontAwesomeIcons.google.data,
+  CategoryIcon.tiktok => FontAwesomeIcons.tiktok.data,
+  CategoryIcon.instagram => FontAwesomeIcons.instagram.data,
+  CategoryIcon.facebook => FontAwesomeIcons.facebook.data,
+  CategoryIcon.xTwitter => FontAwesomeIcons.xTwitter.data,
+  CategoryIcon.twitch => FontAwesomeIcons.twitch.data,
+  CategoryIcon.linkedin => FontAwesomeIcons.linkedin.data,
+  CategoryIcon.github => FontAwesomeIcons.github.data,
+  CategoryIcon.amazon => FontAwesomeIcons.amazon.data,
+  CategoryIcon.discord => FontAwesomeIcons.discord.data,
+  CategoryIcon.uber => FontAwesomeIcons.uber.data,
+  CategoryIcon.airbnb => FontAwesomeIcons.airbnb.data,
+  CategoryIcon.star => Icons.star,
+  CategoryIcon.bookmark => Icons.bookmark,
+  CategoryIcon.flag => Icons.flag,
+  CategoryIcon.person => Icons.person,
+  CategoryIcon.anchor => Icons.anchor,
 };
+
+Widget categoryGlyph(
+  IconData icon, {
+  double? size,
+  Color? color,
+  String? semanticLabel,
+}) => icon.fontPackage == 'font_awesome_flutter'
+    ? FaIcon(
+        FaIconData(icon),
+        size: size,
+        color: color,
+        semanticLabel: semanticLabel,
+      )
+    : Icon(icon, size: size, color: color, semanticLabel: semanticLabel);
 
 Color transactionColor(EntryType type) => switch (type) {
   EntryType.expense => Colors.red,

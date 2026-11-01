@@ -19,7 +19,7 @@ class LedgerDatabase {
     final db = await (factory ?? databaseFactorySqflitePlugin).openDatabase(
       location,
       options: OpenDatabaseOptions(
-        version: 12,
+        version: 13,
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) {
             await db.execute(
@@ -56,6 +56,9 @@ class LedgerDatabase {
           if (oldVersion < 12) {
             await _upgradeCurrencyAndDebts(db);
           }
+          if (oldVersion < 13) {
+            await _addCategoryColors(db);
+          }
         },
         // Table rebuild in v12 preserves dependent receipt/history links.
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = OFF'),
@@ -90,11 +93,16 @@ class LedgerDatabase {
           await _createInvoiceBatches(db);
           await _addRecurringClassification(db);
           await _upgradeCurrencyAndDebts(db);
+          await _addCategoryColors(db);
         },
       ),
     );
     return db;
   }
+
+  static Future<void> _addCategoryColors(DatabaseExecutor db) => db.execute(
+    'ALTER TABLE categories ADD COLUMN color INTEGER CHECK(color IS NULL OR color BETWEEN 4278190080 AND 4294967295)',
+  );
 
   static Future<void> _upgradeCurrencyAndDebts(DatabaseExecutor db) async {
     for (final table in ['accounts', 'transactions']) {

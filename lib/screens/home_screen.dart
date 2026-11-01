@@ -4,6 +4,7 @@ import '../core/domain/ledger.dart';
 import '../core/domain/number_format.dart';
 import '../core/domain/ledger_queries.dart';
 import '../core/presentation/month_selector.dart';
+import '../core/presentation/retained_page.dart';
 import 'monthly_overview.dart';
 import '../core/presentation/transaction_list.dart';
 
@@ -12,6 +13,7 @@ class HomeScreen extends StatefulWidget {
     super.key,
     required this.month,
     this.categoryIcon = _defaultCategoryIcon,
+    this.categoryColor,
     this.currency = Currency.eur,
     required this.summary,
     required this.tab,
@@ -27,6 +29,7 @@ class HomeScreen extends StatefulWidget {
 
   static IconData _defaultCategoryIcon(String _) => Icons.category_outlined;
   final IconData Function(String) categoryIcon;
+  final Color? Function(String)? categoryColor;
   final String? selectedCategory;
   final ValueChanged<String?> onCategoryChanged;
   final GestureDragStartCallback? onOverviewDragStart;
@@ -107,7 +110,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   void _tabChanged() {
     if (_tab == _tabs.index) return;
-    setState(() => _tab = _tabs.index);
+    _tab = _tabs.index;
     widget.onTabChanged(_tab);
   }
 
@@ -247,23 +250,30 @@ class _HomeScreenState extends State<HomeScreen>
               physics: _HomeTabPhysics(lockAtEdge: () => _forwardingDrag),
               controller: _tabs,
               children: [
-                list(
-                  'expenses',
-                  spending,
-                  'No expenses or refunds in this month. Tap + to add one.',
+                RetainedPage(
+                  child: list(
+                    'expenses',
+                    spending,
+                    'No expenses or refunds in this month. Tap + to add one.',
+                  ),
                 ),
-                list(
-                  'income',
-                  income,
-                  'No income in this month. Tap + to add one.',
+                RetainedPage(
+                  child: list(
+                    'income',
+                    income,
+                    'No income in this month. Tap + to add one.',
+                  ),
                 ),
-                MonthlyOverview(
-                  summary: widget.summary,
-                  currency: widget.currency,
-                  categoryIcon: widget.categoryIcon,
-                  selectedCategory: widget.selectedCategory,
-                  onCategoryChanged: widget.onCategoryChanged,
-                  tileBuilder: widget.tileBuilder,
+                RetainedPage(
+                  child: MonthlyOverview(
+                    summary: widget.summary,
+                    currency: widget.currency,
+                    categoryIcon: widget.categoryIcon,
+                    categoryColor: widget.categoryColor,
+                    selectedCategory: widget.selectedCategory,
+                    onCategoryChanged: widget.onCategoryChanged,
+                    tileBuilder: widget.tileBuilder,
+                  ),
                 ),
               ],
             ),

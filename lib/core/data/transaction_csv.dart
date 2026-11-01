@@ -11,9 +11,10 @@ class CsvTransactionRow {
 }
 
 class CsvPreview {
-  const CsvPreview(this.rows, this.errors);
+  const CsvPreview(this.rows, this.errors, {this.hasAssignments = false});
   final List<CsvTransactionRow> rows;
   final List<String> errors;
+  final bool hasAssignments;
 }
 
 class TransactionCsv {
@@ -26,10 +27,40 @@ class TransactionCsv {
   ];
   static const maxBytes = 5 * 1024 * 1024;
   static const maxRows = 5000;
+  static const accountHeaders = [
+    ...headers,
+    'Account',
+    'Type',
+    'Destination account',
+    'Currency',
+  ];
 
-  static String encode(Iterable<LedgerEntry> entries) {
+  static String encode(
+    Iterable<LedgerEntry> entries, {
+    List<Account>? accounts,
+  }) {
+    final byId = {for (final a in accounts ?? <Account>[]) a.id: a};
+    final nameCounts = <String, int>{};
+    for (final a in byId.values) {
+      final name = a.name.trim().toLowerCase();
+      nameCounts[name] = (nameCounts[name] ?? 0) + 1;
+    }
+    String accountName(int? id) {
+      if (id == null) return '';
+      final account = byId[id];
+      if (account == null) {
+        throw const FormatException('An exported account no longer exists.');
+      }
+      if (nameCounts[account.name.trim().toLowerCase()] != 1) {
+        throw FormatException(
+          'Rename duplicate accounts named "${account.name}" before exporting.',
+        );
+      }
+      return account.name;
+    }
+
     return Csv(addBom: true).encode([
-      headers,
+      accounts == null ? headers : accountHeaders,
       for (final e in entries)
         [
           '${e.date.day}.${e.date.month}.${e.date.year >= 2000 && e.date.year <= 2099 ? (e.date.year % 100).toString().padLeft(2, '0') : e.date.year.toString().padLeft(4, '0')}',
@@ -37,6 +68,12 @@ class TransactionCsv {
           e.category,
           '${e.currency.symbol}${e.currency.format(e.amount)}',
           e.notes,
+          if (accounts != null) ...[
+            accountName(e.accountId),
+            e.type.name,
+            accountName(e.destinationId),
+            e.currency.code,
+          ],
         ],
     ]);
   }
@@ -46,14 +83,10 @@ class TransactionCsv {
     EntryType? type,
     int? accountId, {
     Currency currency = Currency.eur,
+    List<Account> accounts = const [],
   }) {
     if (bytes.length > maxBytes) {
       throw const FormatException('Choose a CSV smaller than 5 MB.');
-    }
-    if (type == EntryType.transfer) {
-      throw const FormatException(
-        'This five-column format does not support transfers.',
-      );
     }
     String text;
     try {
@@ -84,13 +117,42 @@ class TransactionCsv {
     final header = records.first
         .map((v) => v.toString().trim().toLowerCase())
         .toList();
-    if (header.length != headers.length ||
-        headers.any((h) => !header.contains(h.toLowerCase()))) {
-      throw FormatException('Expected columns: ${headers.join(', ')}.');
+    final hasAssignments =
+        header.contains('account') || header.contains('type');
+    final expected = hasAssignments ? accountHeaders : headers;
+    if (header.length != expected.length ||
+        header.toSet().length != header.length ||
+        expected.any((h) => !header.contains(h.toLowerCase()))) {
+      throw FormatException('Expected columns: ${expected.join(', ')}.');
     }
-    final indices = headers
+    if (!hasAssignments && type == EntryType.transfer) {
+      throw const FormatException(
+        'Transfers need Account, Type, Destination account and Currency columns.',
+      );
+    }
+    final indices = expected
         .map((h) => header.indexOf(h.toLowerCase()))
         .toList();
+    final accountsByName = <String, List<Account>>{};
+    for (final a in accounts) {
+      (accountsByName[a.name.trim().toLowerCase()] ??= []).add(a);
+    }
+    int? resolveAccount(String name) {
+      if (name.trim().isEmpty) return null;
+      final matches = accountsByName[name.trim().toLowerCase()] ?? const [];
+      if (matches.length != 1) {
+        throw FormatException(
+          matches.isEmpty
+              ? 'Account "$name" was not found. Add it in Accounts first.'
+              : 'Account "$name" is ambiguous. Give the accounts different names.',
+        );
+      }
+      if (matches.single.currency != currency) {
+        throw const FormatException('Account must use the app currency.');
+      }
+      return matches.single.id;
+    }
+
     if (records.length > maxRows + 2) {
       throw const FormatException('Import up to 5,000 rows at a time.');
     }
@@ -99,30 +161,66 @@ class TransactionCsv {
     for (var i = 1; i < records.length; i++) {
       final record = records[i];
       if (record.every((v) => v.toString().trim().isEmpty)) continue;
+      if (rows.length + errors.length >= maxRows) {
+        throw const FormatException('Import up to 5,000 rows at a time.');
+      }
       try {
-        if (record.length != 5) {
-          throw const FormatException(
-            'Expected five columns. Quote prices containing commas.',
+        if (record.length != expected.length) {
+          throw FormatException(
+            'Expected ${expected.length} columns. Quote prices containing commas.',
           );
         }
         final fields = indices.map((j) => record[j].toString()).toList();
         if (fields[1].trim().isEmpty) {
           throw const FormatException('Details are required.');
         }
-        if (fields[2].trim().isEmpty) {
+        final rowType = hasAssignments
+            ? EntryType.values
+                  .where((t) => t.name == fields[6].trim().toLowerCase())
+                  .firstOrNull
+            : type ?? EntryType.expense;
+        if (rowType == null) {
+          throw const FormatException(
+            'Type must be expense, income, refund or transfer.',
+          );
+        }
+        if (hasAssignments && fields[8].trim().toUpperCase() != currency.code) {
+          throw FormatException(
+            'Currency must be ${currency.code}; amounts are not converted.',
+          );
+        }
+        final sourceId = hasAssignments ? resolveAccount(fields[5]) : accountId;
+        final destinationId = hasAssignments ? resolveAccount(fields[7]) : null;
+        if (rowType == EntryType.transfer &&
+            (sourceId == null ||
+                destinationId == null ||
+                sourceId == destinationId)) {
+          throw const FormatException(
+            'Transfers require two different accounts.',
+          );
+        }
+        if (rowType != EntryType.transfer && destinationId != null) {
+          throw const FormatException(
+            'Only transfers have a destination account.',
+          );
+        }
+        if (rowType != EntryType.transfer && fields[2].trim().isEmpty) {
           throw const FormatException('Category is required.');
         }
         rows.add(
           CsvTransactionRow(
             number: i + 1,
             entry: LedgerEntry(
-              type: type ?? EntryType.expense,
+              type: rowType,
               amount: parseCost(fields[3], currency: currency),
               currency: currency,
               date: parseDate(fields[0]),
               description: fields[1].trim(),
-              category: fields[2].trim(),
-              accountId: accountId,
+              category: rowType == EntryType.transfer
+                  ? 'Transfer'
+                  : fields[2].trim(),
+              accountId: sourceId,
+              destinationId: destinationId,
               notes: fields[4],
             ),
           ),
@@ -134,7 +232,7 @@ class TransactionCsv {
     if (rows.isEmpty && errors.isEmpty) {
       errors.add('The CSV contains no transactions.');
     }
-    return CsvPreview(rows, errors);
+    return CsvPreview(rows, errors, hasAssignments: hasAssignments);
   }
 
   static DateTime parseDate(String text) {

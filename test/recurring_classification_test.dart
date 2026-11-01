@@ -189,6 +189,7 @@ void main() {
     await original.db.execute(
       'ALTER TABLE recurring_rules DROP COLUMN is_liability',
     );
+    await original.db.execute('ALTER TABLE categories DROP COLUMN color');
     await original.db.setVersion(10);
     await original.db.close();
     original.dispose();
@@ -198,7 +199,7 @@ void main() {
       factory: databaseFactoryFfi,
     );
     try {
-      expect(await migrated.db.getVersion(), 12);
+      expect(await migrated.db.getVersion(), 13);
       expect(migrated.recurringRules.single.description, 'Existing schedule');
       expect(migrated.recurringRules.single.isAsset, isFalse);
       expect(migrated.recurringRules.single.isLiability, isFalse);

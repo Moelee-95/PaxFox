@@ -95,6 +95,27 @@ enum CategoryIcon {
   time,
   workTools,
   language,
+  netflix,
+  youtube,
+  spotify,
+  apple,
+  google,
+  tiktok,
+  instagram,
+  facebook,
+  xTwitter,
+  twitch,
+  linkedin,
+  github,
+  amazon,
+  discord,
+  uber,
+  airbnb,
+  star,
+  bookmark,
+  flag,
+  person,
+  anchor,
 }
 
 CategoryKind categoryKind(EntryType type) =>
@@ -106,15 +127,20 @@ class LedgerCategory {
     required this.name,
     required this.kind,
     this.icon = CategoryIcon.general,
+    this.color,
   });
   final int id;
   final String name;
   final CategoryKind kind;
   final CategoryIcon icon;
+
+  /// Opaque ARGB color; null preserves legacy presentation.
+  final int? color;
   factory LedgerCategory.fromMap(Map<String, Object?> row) => LedgerCategory(
     id: row['id'] as int,
     name: row['name'] as String,
     kind: CategoryKind.values.byName(row['kind'] as String),
+    color: row['color'] as int?,
     icon:
         CategoryIcon.values
             .where((icon) => icon.name == row['icon'])

@@ -1,20 +1,19 @@
 import 'package:flutter/material.dart';
 
-import '../core/presentation/grouped_amount_formatter.dart';
-
-import '../core/presentation/entry_type_picker.dart';
-
 import '../core/data/ledger_store.dart';
 import '../core/domain/ledger.dart';
 import '../core/domain/recurring.dart';
+import '../core/presentation/async_action.dart';
+import '../core/presentation/bottom_action_bar.dart';
 import '../core/presentation/confirmation_dialog.dart';
+import '../core/presentation/entry_type_picker.dart';
+import '../core/presentation/grouped_amount_formatter.dart';
 import '../core/presentation/info_button.dart';
 import '../core/presentation/ledger_refresh.dart';
 import '../core/presentation/responsive_pair.dart';
-import '../core/presentation/bottom_action_bar.dart';
 
 const _recurringInfo =
-    'Monthly expenses and income are posted automatically when you open or resume Moneva. Missed due dates are caught up. No bank connection: this updates your local ledger, not your real bank. Days 29-31 use the last day in shorter months. No weekend adjustment.';
+    'Monthly expenses and income are posted automatically when you open or resume Paxlee. Missed due dates are caught up. No bank connection: this updates your local ledger, not your real bank. Days 29-31 use the last day in shorter months. No weekend adjustment.';
 const _recurringHistoryInfo =
     'Unpaid occurrences keep their original amount and account. Retry books the payment on today\'s date and preserves its scheduled due date in this history. Editing a rule affects future occurrences only. If a posted payment is edited or deleted in Transactions, it is never automatically recreated.';
 const _recurringFormInfo =
@@ -277,9 +276,10 @@ class _RecurringFormState extends State<RecurringForm> {
   late int day;
   late DateTime start;
   DateTime? end;
-  bool busy = false;
+  late final action = AsyncAction()..addListener(() => setState(() {}));
+  bool get busy => action.busy;
   late bool isAsset, isLiability;
-  String? error;
+  String? get error => action.error;
   @override
   void initState() {
     super.initState();
@@ -306,6 +306,7 @@ class _RecurringFormState extends State<RecurringForm> {
     description.dispose();
     amount.dispose();
     interval.dispose();
+    action.dispose();
     super.dispose();
   }
 
@@ -313,12 +314,8 @@ class _RecurringFormState extends State<RecurringForm> {
     if (!form.currentState!.validate()) {
       return;
     }
-    setState(() {
-      busy = true;
-      error = null;
-    });
-    try {
-      await widget.store.saveRecurring(
+    final saved = await action.run(
+      () async => widget.store.saveRecurring(
         RecurringRule(
           id: widget.rule?.id,
           type: type,
@@ -334,25 +331,10 @@ class _RecurringFormState extends State<RecurringForm> {
           endDate: end,
           active: widget.rule?.active ?? true,
         ),
-      );
-      if (mounted) {
-        Navigator.pop(context);
-      }
-    } on ArgumentError catch (e) {
-      if (mounted) {
-        setState(() {
-          busy = false;
-          error = '${e.message}';
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          busy = false;
-          error = 'Could not save recurring payment. Please retry.';
-        });
-      }
-    }
+      ),
+      failureMessage: 'Could not save recurring payment. Please retry.',
+    );
+    if (saved && mounted) Navigator.pop(context);
   }
 
   @override

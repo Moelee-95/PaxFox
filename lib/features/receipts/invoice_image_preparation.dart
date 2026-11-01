@@ -107,13 +107,23 @@ class InvoiceImagePreparation {
   Future<File> _prepare(File source) async {
     final bytes = await bytesFor(source);
     if (_disposed) throw StateError('Image preparation has been closed.');
-    final directory = await (_directory ??= _createDirectory());
+    final directory = await (_directory ??= _createDirectory().catchError((
+      Object error,
+    ) {
+      _directory = null;
+      throw error;
+    }));
     if (_disposed) throw StateError('Image preparation has been closed.');
     final file = File(p.join(directory.path, 'page-${_nextPage++}.jpg'));
     _files.add(file);
-    await file.writeAsBytes(bytes, flush: true);
-    _prepared[file] = bytes;
-    return file;
+    try {
+      await file.writeAsBytes(bytes, flush: true);
+      _prepared[file] = bytes;
+      return file;
+    } catch (_) {
+      await release(file);
+      rethrow;
+    }
   }
 
   Future<Directory> _createDirectory() async =>

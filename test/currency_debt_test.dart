@@ -241,6 +241,7 @@ void main() {
     }
     await old.db.execute('ALTER TABLE receipt_items DROP COLUMN item_date');
     await old.db.execute('DROP TABLE debts');
+    await old.db.execute('ALTER TABLE categories DROP COLUMN color');
     await old.db.setVersion(11);
     await old.db.close();
     old.dispose();
@@ -249,7 +250,7 @@ void main() {
       factory: databaseFactoryFfi,
     );
     try {
-      expect(await migrated.db.getVersion(), 12);
+      expect(await migrated.db.getVersion(), 13);
       expect(migrated.currency, Currency.eur);
       expect(migrated.entries.single.id, entry.id);
       expect(migrated.entries.single.createdAt, entry.createdAt);

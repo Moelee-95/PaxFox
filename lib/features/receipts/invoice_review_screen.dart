@@ -2,15 +2,15 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
-import '../../core/presentation/grouped_amount_formatter.dart';
-
 import '../../core/data/ledger_store.dart';
 import '../../core/domain/ledger.dart';
 import '../../core/presentation/account_picker.dart';
 import '../../core/presentation/bottom_action_bar.dart';
 import '../../core/presentation/confirmation_dialog.dart';
+import '../../core/presentation/grouped_amount_formatter.dart';
 import '../../core/presentation/info_button.dart';
 import 'invoice.dart';
+import 'invoice_image_preview.dart';
 import 'invoice_images.dart';
 
 class InvoiceReviewScreen extends StatefulWidget {
@@ -254,28 +254,9 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
               24 + MediaQuery.paddingOf(context).bottom,
             ),
             children: [
-              for (final file in widget.images)
-                SizedBox(
-                  height: 180,
-                  child: Image.file(
-                    file,
-                    errorBuilder: (_, _, _) => const Text('Image unavailable'),
-                  ),
-                ),
+              for (final file in widget.images) InvoiceImagePreview(file: file),
               for (final path in widget.storedPaths)
-                FutureBuilder<File>(
-                  future: InvoiceImages().resolve(path),
-                  builder: (_, snapshot) => snapshot.hasData
-                      ? SizedBox(
-                          height: 180,
-                          child: Image.file(
-                            snapshot.data!,
-                            errorBuilder: (_, _, _) =>
-                                const Text('Stored image unavailable'),
-                          ),
-                        )
-                      : const SizedBox(height: 30),
-                ),
+                InvoiceImagePreview.stored(path: path),
               if (widget.draft.currency?.trim().toUpperCase() != currency.code)
                 Text(
                   'Detected currency: ${widget.draft.currency ?? 'unknown'}. Only ${currency.code} invoices can be saved. Do not relabel a foreign-currency amount.',

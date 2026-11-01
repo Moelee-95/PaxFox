@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/data/ledger_store.dart';
+import '../core/presentation/async_action.dart';
 import '../core/presentation/info_button.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -15,11 +16,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController timeout = TextEditingController(
     text: '${widget.store.invoiceTimeoutSeconds}',
   );
-  bool saving = false;
-  String? error;
+  late final action = AsyncAction()..addListener(() => setState(() {}));
+  bool get saving => action.busy;
+  String? get error => action.error;
   @override
   void dispose() {
     timeout.dispose();
+    action.dispose();
     super.dispose();
   }
 
@@ -77,24 +80,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     if (!form.currentState!.validate()) {
                       return;
                     }
-                    setState(() {
-                      saving = true;
-                      error = null;
-                    });
-                    try {
-                      await widget.store.saveInvoiceTimeout(
+                    final saved = await action.run(
+                      () => widget.store.saveInvoiceTimeout(
                         int.parse(timeout.text.trim()),
-                      );
-                      if (context.mounted) {
-                        Navigator.pop(context);
-                      }
-                    } catch (_) {
-                      if (mounted) {
-                        setState(() {
-                          saving = false;
-                          error = 'Could not save settings. Please retry.';
-                        });
-                      }
+                      ),
+                      failureMessage: 'Could not save settings. Please retry.',
+                    );
+                    if (saved && context.mounted) {
+                      Navigator.pop(context);
                     }
                   },
             child: Text(saving ? 'Saving...' : 'Save settings'),

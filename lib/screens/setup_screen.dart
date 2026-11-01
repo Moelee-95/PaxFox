@@ -141,7 +141,7 @@ class _SetupScreenState extends State<SetupScreen> {
     canPop: false,
     child: Scaffold(
       appBar: AppBar(
-        title: const Text('Welcome to Moneva'),
+        title: const Text('Welcome to Paxlee'),
         automaticallyImplyLeading: false,
       ),
       body: Center(

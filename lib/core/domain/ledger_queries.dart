@@ -5,16 +5,19 @@ class LedgerIndex {
     : entries = List.unmodifiable(entries) {
     for (final entry in this.entries) {
       (_months[(entry.date.year, entry.date.month)] ??= []).add(entry);
-      _searchText.add(
-        '${entry.description} ${entry.notes} ${entry.category}'.toLowerCase(),
-      );
     }
   }
 
   final List<LedgerEntry> entries;
   final _months = <(int, int), List<LedgerEntry>>{};
   final _summaries = <(int, int), MonthlyLedger>{};
-  final _searchText = <String>[];
+  // Most snapshots are used only by Home/Overview. Build normalized text only
+  // when a text search needs it, rather than delaying every snapshot reload.
+  late final _searchText = [
+    for (final entry in entries)
+      '${entry.description} ${entry.notes} ${entry.category}'.toLowerCase(),
+  ];
+  final _typeResults = <EntryType, List<LedgerEntry>>{};
   String? _lastQuery;
   EntryType? _lastType;
   List<LedgerEntry>? _lastResult;
@@ -29,7 +32,13 @@ class LedgerIndex {
 
   List<LedgerEntry> search({String query = '', EntryType? type}) {
     final normalized = query.toLowerCase();
-    if (normalized.isEmpty && type == null) return entries;
+    if (normalized.isEmpty) {
+      if (type == null) return entries;
+      return _typeResults.putIfAbsent(
+        type,
+        () => List.unmodifiable(entries.where((entry) => entry.type == type)),
+      );
+    }
     if (_lastQuery == normalized && _lastType == type) return _lastResult!;
     _lastQuery = normalized;
     _lastType = type;
@@ -55,6 +64,7 @@ class MonthlyLedger {
         case EntryType.expense || EntryType.refund:
           spending.add(entry);
           final key = (entry.currency, entry.category);
+          (_categoryEntries[key] ??= []).add(entry);
           categories.update(
             key,
             (value) => value + _spendingAmount(entry),
@@ -70,6 +80,9 @@ class MonthlyLedger {
     incomeEntries = List.unmodifiable(income);
     totalsByCurrency = Map.unmodifiable(totals);
     spendingByCategory = Map.unmodifiable(categories);
+    for (final key in _categoryEntries.keys) {
+      _categoryEntries[key] = List.unmodifiable(_categoryEntries[key]!);
+    }
   }
 
   final List<LedgerEntry> entries;
@@ -77,6 +90,22 @@ class MonthlyLedger {
   late final List<LedgerEntry> incomeEntries;
   late final Map<Currency, Totals> totalsByCurrency;
   late final Map<(Currency, String), int> spendingByCategory;
+  final _categoryEntries = <(Currency, String), List<LedgerEntry>>{};
+  final _rankedCategories =
+      <Currency, List<MapEntry<(Currency, String), int>>>{};
+
+  List<LedgerEntry> spendingForCategory(Currency currency, String category) =>
+      _categoryEntries[(currency, category)] ?? const [];
+
+  List<MapEntry<(Currency, String), int>> rankedCategories(Currency currency) =>
+      _rankedCategories.putIfAbsent(currency, () {
+        final ranked =
+            spendingByCategory.entries
+                .where((item) => item.key.$1 == currency)
+                .toList()
+              ..sort((a, b) => b.value.compareTo(a.value));
+        return List.unmodifiable(ranked);
+      });
   Totals totalsFor(Currency currency) => totalsByCurrency[currency] ?? Totals();
   Totals get eurTotals => totalsByCurrency[Currency.eur] ?? Totals();
 

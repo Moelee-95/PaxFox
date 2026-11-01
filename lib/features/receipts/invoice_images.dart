@@ -24,8 +24,8 @@ class InvoiceImages {
         final target = await resolve(relative);
         await target.parent.create(recursive: true);
         final bytes = await InvoiceImagePreparation.bytesFor(files[i]);
-        await target.writeAsBytes(bytes, flush: true);
         result.add(relative);
+        await target.writeAsBytes(bytes, flush: true);
       }
       return result;
     } catch (_) {
