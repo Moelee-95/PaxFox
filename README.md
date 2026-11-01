@@ -8,6 +8,7 @@ An offline Flutter personal finance app with local SQLite storage. Start with [A
 - Cash/bank accounts, account-specific overdraft and blocked-funds rules, outstanding debts and required first-run setup.
 - Expenses, income, refunds and transfers; edit/delete, monthly browsing, search, type filters and atomic bulk actions.
 - Home with separate expense/income tabs and monthly category reports; Overview for account wealth and debts; Cashflow reserved for future work.
+- Reusable bottom-sheet transaction/recurring/item editors and category/type pickers, with saved icons/colors, draft-safe cancellation and keyboard-aware pinned actions.
 - More with a local profile, searchable management options, CSV import/export and settings. Support options are visible with actions deferred.
 - Category editor with 21 colors and 113 searchable grouped icons, including bundled brands. Transaction badges use saved category colors; prices show transaction direction independently.
 - Monthly recurring expense/income schedules, catch-up on startup/resume, pause/resume, unpaid history and explicit retry/skip. These are bookkeeping entries, not real bank payments.
@@ -54,3 +55,5 @@ Invoice extraction uses the encrypted remote configuration protocol in `gemini_k
 On 2026-11-01: clean analyzer, 197 passing tests, successful release APK and checked rendered light/dark and narrow/large-text layouts. Tests cover financial policies, migrations, recurrence, invoice handling, failure recovery, editing/selection, navigation, page-state retention and rebuild regressions.
 
 Real-device frame times, live Gemini, native camera behavior, iOS and production publishing remain unverified. Use profile/release mode on a physical device to assess smoothness; see [performance notes](docs/PERFORMANCE.md).
+
+Overview includes an interactive monthly net-savings chart built with FL Chart (MIT). Select bars or month labels and browse historical periods; exact totals include refunds and exclude transfers.

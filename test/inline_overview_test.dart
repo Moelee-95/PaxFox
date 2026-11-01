@@ -1,3 +1,4 @@
+import 'helpers/sheet_helpers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moneva/core/data/ledger_store.dart';
@@ -72,7 +73,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Save transaction'), findsOneWidget);
       expect(find.text('Currency: EUR'), findsNothing);
-      await tester.pageBack();
+      await closeTopPage(tester);
       await tester.pumpAndSettle();
       await tester.longPress(find.text('Bread'));
       await tester.pumpAndSettle();

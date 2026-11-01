@@ -105,8 +105,8 @@ void main() {
       await tester.pumpWidget(MaterialApp(home: RecurringForm(store: store)));
       await tester.pumpAndSettle();
       final amount = find.widgetWithText(TextFormField, 'Amount (€)');
-      final category = find.byType(DropdownButtonFormField<String>);
-      expect(tester.getTopLeft(amount).dy, tester.getTopLeft(category).dy);
+      final category = find.byKey(const ValueKey('category-picker'));
+      expect(tester.getTopLeft(category).dy, lessThan(tester.getTopLeft(amount).dy));
       final day = find.widgetWithText(
         DropdownButtonFormField<int>,
         'Day of month',

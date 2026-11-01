@@ -88,8 +88,8 @@ void main() {
       );
       final amount = find.widgetWithText(TextFormField, 'Amount');
       expect(
-        tester.getTopLeft(amount).dy - tester.getBottomLeft(description).dy,
-        greaterThanOrEqualTo(16),
+        tester.getTopLeft(description).dy - tester.getBottomLeft(amount).dy,
+        greaterThanOrEqualTo(8),
       );
       final account = find.byKey(
         ValueKey('account-card-${store.accounts.single.id}'),

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../core/presentation/busy_label.dart';
+import '../core/presentation/entry_type_picker.dart';
+import '../core/domain/ledger.dart';
 
 import '../core/data/ledger_store.dart';
 import '../core/domain/category.dart';
@@ -15,10 +17,12 @@ class CategoryForm extends StatefulWidget {
     required this.store,
     required this.kind,
     this.category,
+    this.lockKind = false,
   });
   final LedgerStore store;
   final CategoryKind kind;
   final LedgerCategory? category;
+  final bool lockKind;
 
   @override
   State<CategoryForm> createState() => _CategoryFormState();
@@ -213,68 +217,20 @@ class _CategoryFormState extends State<CategoryForm> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: colors.surfaceContainerLow,
-                              borderRadius: BorderRadius.circular(40),
-                            ),
-                            child: Row(
-                              children: [
-                                for (final kind in CategoryKind.values)
-                                  Expanded(
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(2),
-                                      child: OutlinedButton(
-                                        key: ValueKey(
-                                          'category-kind-${kind.name}',
-                                        ),
-                                        onPressed:
-                                            _action.busy ||
-                                                widget.category != null
-                                            ? null
-                                            : () => setState(() {
-                                                _kind = kind;
-                                              }),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor:
-                                              kind == CategoryKind.expense
-                                              ? Colors.red.shade600
-                                              : Colors.green.shade600,
-                                          disabledForegroundColor: _kind == kind
-                                              ? (kind == CategoryKind.expense
-                                                    ? Colors.red.shade600
-                                                    : Colors.green.shade600)
-                                              : colors.onSurfaceVariant,
-                                          backgroundColor: _kind == kind
-                                              ? (kind == CategoryKind.expense
-                                                        ? Colors.red
-                                                        : Colors.green)
-                                                    .withValues(alpha: .08)
-                                              : Colors.transparent,
-                                          side: BorderSide(
-                                            color: _kind == kind
-                                                ? (kind == CategoryKind.expense
-                                                      ? Colors.red
-                                                      : Colors.green)
-                                                : Colors.transparent,
-                                            width: 1.5,
-                                          ),
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 14,
-                                            horizontal: 8,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          kind == CategoryKind.expense
-                                              ? 'Expense'
-                                              : 'Income',
-                                        ),
-                                      ),
-                                    ),
+                          EntryTypePicker(
+                            value: _kind == CategoryKind.expense
+                                ? EntryType.expense
+                                : EntryType.income,
+                            types: const [EntryType.expense, EntryType.income],
+                            label: 'Category type',
+                            onChanged:
+                                _action.busy ||
+                                    widget.category != null ||
+                                    widget.lockKind
+                                ? null
+                                : (value) => setState(
+                                    () => _kind = categoryKind(value!),
                                   ),
-                              ],
-                            ),
                           ),
                           if (widget.category != null)
                             Padding(

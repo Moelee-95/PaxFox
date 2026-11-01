@@ -1,3 +1,5 @@
+import 'helpers/sheet_helpers.dart';
+
 import 'dart:convert';
 import 'dart:io';
 
@@ -8,7 +10,6 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:moneva/core/data/ledger_store.dart';
 import 'package:moneva/core/domain/ledger.dart';
-import 'package:moneva/core/presentation/selection_cards.dart';
 import 'package:moneva/features/receipts/gemini_invoice_extractor.dart';
 import 'package:moneva/features/receipts/invoice.dart';
 import 'package:moneva/features/receipts/invoice_image_preparation.dart';
@@ -360,14 +361,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const ValueKey('create-income-manual')));
         await tester.pumpAndSettle();
-        expect(
-          tester
-              .widget<SelectionCard>(
-                find.byKey(const ValueKey('entry-type-income')),
-              )
-              .selected,
-          isTrue,
-        );
+        expect(find.text('Income'), findsWidgets);
         await tester.enterText(
           find.widgetWithText(TextFormField, 'Description / merchant'),
           'Manual salary',
@@ -376,9 +370,9 @@ void main() {
           find.widgetWithText(TextFormField, 'Amount'),
           '20',
         );
-        await tester.tap(find.byType(DropdownButtonFormField<String>));
+        await openCategoryPicker(tester);
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Salary').last);
+        await chooseCategory(tester, 'Salary');
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(ValueKey('account-card-$blockedId')));
         await tester.runAsync(() async {

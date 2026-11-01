@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/data/ledger_store.dart';
 import '../core/presentation/account_balance_card.dart';
 import '../core/presentation/metric_card.dart';
+import '../core/presentation/monthly_savings_chart.dart';
 import '../core/presentation/responsive_pair.dart';
 import '../core/domain/ledger.dart';
 import '../core/presentation/debt_editor.dart';
@@ -144,6 +145,15 @@ class OverviewScreen extends StatelessWidget {
           sliver: SliverList.builder(
             itemCount: debts.length,
             itemBuilder: (context, index) => _debtCard(context, debts[index]),
+          ),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+          sliver: SliverToBoxAdapter(
+            child: MonthlySavingsChart(
+              currency: store.currency,
+              summaryForMonth: store.monthSummary,
+            ),
           ),
         ),
         const SliverToBoxAdapter(child: SizedBox(height: 88)),

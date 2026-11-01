@@ -1,3 +1,4 @@
+import 'helpers/sheet_helpers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moneva/core/data/ledger_store.dart';
@@ -135,9 +136,9 @@ void main() {
         '1234.56',
       );
       expect(find.text('1,234.56'), findsOneWidget);
-      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await openCategoryPicker(tester);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Groceries').last);
+      await chooseCategory(tester, 'Groceries');
       await tester.pumpAndSettle();
       await tester.tap(find.text('Cash'));
       await tester.pumpAndSettle();

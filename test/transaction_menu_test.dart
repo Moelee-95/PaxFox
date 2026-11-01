@@ -1,3 +1,4 @@
+import 'helpers/sheet_helpers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -99,7 +100,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Save transaction'), findsOneWidget);
       expect(find.byTooltip('Scan invoice'), findsNothing);
-      await tester.pageBack();
+      await closeTopPage(tester);
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Add transaction'));
       await tester.pumpAndSettle();
@@ -107,7 +108,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(InvoiceScanScreen), findsOneWidget);
       expect(scans, 1);
-      await tester.pageBack();
+      await closeTopPage(tester);
       await tester.pumpAndSettle();
       expect(find.text('Home'), findsOneWidget);
       expect(store.entries, isEmpty);

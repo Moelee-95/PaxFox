@@ -1,3 +1,5 @@
+import 'helpers/sheet_helpers.dart';
+
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -261,7 +263,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Family loan'), findsOneWidget);
       await preview(tester, 'accounts-management');
-      await tester.pageBack();
+      await closeTopPage(tester);
       await tester.pumpAndSettle();
       await tester.tap(
         find.descendant(
@@ -282,7 +284,7 @@ void main() {
       );
       expect(find.byType(DropdownButtonFormField<EntryType>), findsNothing);
       await preview(tester, 'manual-inputs');
-      await tester.pageBack();
+      await closeTopPage(tester);
       await tester.pumpAndSettle();
       await tester.tap(
         find.descendant(
@@ -298,7 +300,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Add recurring payment'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Income').last);
+      await chooseEntryType(tester, 'income');
       await tester.pumpAndSettle();
       await tester.enterText(
         find.widgetWithText(TextFormField, 'Description (e.g. Rent)'),
@@ -308,9 +310,9 @@ void main() {
         find.widgetWithText(TextFormField, 'Amount (IQD)'),
         '2400',
       );
-      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await openCategoryPicker(tester);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Salary').last);
+      await chooseCategory(tester, 'Salary');
       await tester.pumpAndSettle();
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pumpAndSettle();

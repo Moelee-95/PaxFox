@@ -101,6 +101,12 @@ Income extraction uses a dedicated prompt for payslips, bank statements and paid
 
 PDF attachments show a PDF document card rather than image rasterization; their original bytes remain attached. File-picker content streams are copied into owned temporary files with size/timeout checks, prepared into owned scan files, and source copies are removed afterward. Stored PDFs use `.pdf`; images remain `.jpg`. Existing 25 MiB source and 12 MiB combined upload limits remain, including PDFs; unreadable/encrypted/oversized documents may require a clearer/smaller file. Native picker/scanner and live Gemini still require device verification.
 
+## Category/type selection and editor sheets
+
+Manual transactions, recurring rules and scanned items share `EntryEditorSheet`; category selection uses a lazy grid of saved icons/colors. Manual pickers may change type; recurring restricts to expense/income. Bulk category changes and scanned review keep their existing type/kind constraints. A picker type switch remains local until a category is chosen (Transfer needs no category). Cancel preserves the draft; category edits are independent saves, so a saved rename is handed back by stable ID. Stored category labels and the existing rename cascade are unchanged.
+
+Type-only selection shares a single/multi-select sheet. CSV stages a copy until Apply, requires at least one type, and retains mixed-account/type semantics. Keyboard transitions preserve field elements. Pending writes block editor dismissal and duplicate submission while showing loading feedback. No database migration or financial formula changed.
+
 ## Recurring execution
 
 Monthly expense/income rules only, interval 1-120 months. Days 29-31 clamp to month's last day. First schedule must be today/later and outside opening snapshot coverage. Checks happen on startup/resume, rule save, or manual Check due payments; ordinary pull refresh only reloads storage. No OS background scheduler or real bank payment.
@@ -124,3 +130,9 @@ Preview before committing; invalid rows prevent import, and the preview identifi
 No login, cloud sync, bank integration, analytics backend, budgets, full backup/restore, XLSX import, FX, native OCR, web runtime, weekly/yearly schedules or notification service. No production signing verification or iOS device validation is implied by debug Android builds. Dependencies and native adapters are mapped in [build/porting](APP_MAP.md#build-export-and-porting).
 
 Private databases, financial workbooks, `/examples`, `/exports` and the original implementation prompt are ignored. Do not use private financial records as test fixtures or log receipt/provider/key contents. Synthetic tests cover behavior without paid Gemini requests.
+
+Category picker Edit opens the Categories management route on the current expense/income kind instead of changing grid taps into edit actions. Back returns to the picker; independently saved renames remain attached to draft selections by stable ID. Management cards use the indexed kind lists and lazy builders; displayed ordinals are list positions, not persisted IDs or ordering controls.
+
+## Overview monthly net savings
+
+Confirmed definition: monthly savings equals income minus spending in the setup currency. Existing `MonthlyLedger.totalsFor(currency)` / `Totals.net` provide the values: refunds reduce spending and transfers are excluded. Opening balances, outstanding debt balances and unposted recurring schedules are not savings transactions. Current-month totals follow Home's transaction-date grouping and are labeled In progress; future months are not offered. This is a monthly flow, not cumulative savings or month-end account wealth. Empty months are zero. Money remains integer minor units; only plotted coordinates use doubles, with full currency precision retained in selected summaries/tooltips. No schema or financial calculation change.

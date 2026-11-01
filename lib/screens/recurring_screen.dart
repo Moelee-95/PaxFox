@@ -6,10 +6,10 @@ import '../core/data/ledger_store.dart';
 import '../core/domain/ledger.dart';
 import '../core/domain/recurring.dart';
 import '../core/presentation/async_action.dart';
-import '../core/presentation/bottom_action_bar.dart';
 import '../core/presentation/confirmation_dialog.dart';
-import '../core/presentation/entry_type_picker.dart';
-import '../core/presentation/grouped_amount_formatter.dart';
+import '../core/presentation/entry_editor_sheet.dart';
+import '../core/presentation/category_picker.dart';
+import '../core/presentation/app_sheet.dart';
 import '../core/presentation/info_button.dart';
 import '../core/presentation/ledger_refresh.dart';
 import '../core/presentation/responsive_pair.dart';
@@ -56,11 +56,10 @@ class _RecurringScreenState extends State<RecurringScreen> {
     }
   }
 
-  void edit([RecurringRule? rule]) => Navigator.push(
+  void edit([RecurringRule? rule]) => showAppSheet<void>(
     context,
-    MaterialPageRoute<void>(
-      builder: (_) => RecurringForm(store: widget.store, rule: rule),
-    ),
+    editor: true,
+    builder: (_) => RecurringForm(store: widget.store, rule: rule),
   );
   Future<void> remove(RecurringRule rule) async {
     final yes = await confirmAction(
@@ -343,231 +342,182 @@ class _RecurringFormState extends State<RecurringForm> {
   }
 
   @override
-  Widget build(BuildContext context) => PopScope(
-    canPop: !busy,
-    child: Scaffold(
-      appBar: AppBar(
-        title: Text(
-          widget.rule == null
-              ? 'Add recurring payment'
-              : 'Edit recurring payment',
+  Widget build(BuildContext context) => Form(
+    key: form,
+    child: EntryEditorSheet(
+      title: widget.rule == null
+          ? 'Add recurring payment'
+          : 'Edit recurring payment',
+      type: type,
+      currency: widget.store.currency,
+      amount: amount,
+      busy: busy,
+      saveLabel: 'Save recurring payment',
+      onSave: save,
+      amountLabel: 'Amount (${widget.store.currency.symbol.trim()})',
+      amountValidator: (s) {
+        try {
+          if (widget.store.currency.parseInput(s ?? '') <= 0) {
+            return 'Enter an amount greater than zero.';
+          }
+        } on FormatException catch (e) {
+          return e.message;
+        }
+        return null;
+      },
+      categoryPicker: CategoryPickerField(
+        store: widget.store,
+        type: type,
+        value: category,
+        header: true,
+        enabled: !busy,
+        types: const [EntryType.expense, EntryType.income],
+        onChanged: (value) => setState(() {
+          if (type != value.type) {
+            accountId = null;
+            isAsset = false;
+            isLiability = false;
+          }
+          type = value.type;
+          category = value.name;
+        }),
+      ),
+      actions: const [
+        InfoButton(
+          title: 'Recurring schedule information',
+          message: _recurringFormInfo,
         ),
-        actions: const [
-          InfoButton(
-            title: 'Recurring schedule information',
-            message: _recurringFormInfo,
+      ],
+      children: [
+        TextFormField(
+          controller: description,
+          enabled: !busy,
+          decoration: const InputDecoration(
+            labelText: 'Description (e.g. Rent)',
           ),
-        ],
-      ),
-      bottomNavigationBar: BottomActionBar(
-        label: 'Save recurring payment',
-        busy: busy,
-        onPressed: save,
-      ),
-      body: Form(
-        key: form,
-        child: ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            EntryTypePicker(
-              value: type,
-              types: const [EntryType.expense, EntryType.income],
-              onChanged: busy
-                  ? null
-                  : (value) => setState(() {
-                      type = value!;
-                      category = null;
-                      accountId = null;
-                      isAsset = false;
-                      isLiability = false;
-                    }),
-            ),
-            TextFormField(
-              controller: description,
-              enabled: !busy,
-              decoration: const InputDecoration(
-                labelText: 'Description (e.g. Rent)',
-              ),
-              validator: (s) =>
-                  s == null || s.trim().isEmpty ? 'Enter a description.' : null,
-            ),
-            const SizedBox(height: 16),
-            ResponsivePair(
-              left: TextFormField(
-                controller: amount,
-                inputFormatters: const [GroupedAmountFormatter()],
-                enabled: !busy,
-                decoration: InputDecoration(
-                  labelText: 'Amount (${widget.store.currency.symbol.trim()})',
-                ),
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                validator: (s) {
-                  try {
-                    if (widget.store.currency.parseInput(s ?? '') <= 0) {
-                      return 'Enter an amount greater than zero.';
-                    }
-                  } on FormatException catch (e) {
-                    return e.message;
-                  }
-                  return null;
-                },
-              ),
-              right: DropdownButtonFormField<String>(
-                isExpanded: true,
-                key: ValueKey('category-$type'),
-                initialValue: category,
-                decoration: InputDecoration(
-                  labelText: type == EntryType.income
-                      ? 'Income category'
-                      : 'Expense category',
-                ),
-                items: widget.store
-                    .categoriesFor(type)
-                    .map(
-                      (c) =>
-                          DropdownMenuItem(value: c.name, child: Text(c.name)),
-                    )
-                    .toList(),
-                onChanged: busy
-                    ? null
-                    : (value) => setState(() => category = value),
-                validator: (value) =>
-                    value == null ? 'Select a category.' : null,
-              ),
-            ),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<int>(
-              key: ValueKey('account-$type'),
-              initialValue:
-                  widget.store.accounts.any(
-                    (a) =>
-                        a.id == accountId &&
-                        (type == EntryType.income || a.available),
-                  )
-                  ? accountId
-                  : null,
-              decoration: InputDecoration(
-                labelText: type == EntryType.income
-                    ? 'Receiving account'
-                    : 'Payment account',
-              ),
-              items: widget.store.accounts
-                  .where((a) => type == EntryType.income || a.available)
-                  .map(
-                    (a) => DropdownMenuItem(value: a.id, child: Text(a.name)),
-                  )
-                  .toList(),
-              onChanged: busy
-                  ? null
-                  : (value) => setState(() => accountId = value),
-              validator: (value) => value == null
-                  ? 'Select an account for this recurring entry.'
-                  : null,
-            ),
-            const SizedBox(height: 16),
-            ResponsivePair(
-              left: DropdownButtonFormField<int>(
-                initialValue: day,
-                decoration: const InputDecoration(labelText: 'Day of month'),
-                items: List.generate(
-                  31,
-                  (i) =>
-                      DropdownMenuItem(value: i + 1, child: Text('${i + 1}')),
-                ),
-                onChanged: busy
-                    ? null
-                    : (value) => setState(() => day = value!),
-              ),
-              right: TextFormField(
-                controller: interval,
-                enabled: !busy,
-                decoration: const InputDecoration(labelText: 'Every N months'),
-                keyboardType: TextInputType.number,
-                validator: (s) {
-                  final n = int.tryParse(s ?? '');
-                  return n == null || n < 1 || n > 120
-                      ? 'Use 1 to 120 months.'
-                      : null;
-                },
-              ),
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text('Start on or after: ${dayKey(start)}'),
-              subtitle: Text(
-                'First scheduled payment: ${dayKey(firstMonthlyDate(start, day))}',
-              ),
-              trailing: const Icon(Icons.calendar_today),
-              onTap: busy
-                  ? null
-                  : () async {
-                      final today = dateOnly(DateTime.now());
-                      final date = await showDatePicker(
-                        context: context,
-                        initialDate: start.isBefore(today) ? today : start,
-                        firstDate: today,
-                        lastDate: DateTime(2100),
-                      );
-                      if (date != null && mounted) {
-                        setState(() => start = date);
-                      }
-                    },
-            ),
-            ResponsivePair(
-              left: ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(
-                  end == null ? 'End date: none' : 'End date: ${dayKey(end!)}',
-                ),
-                trailing: end == null
-                    ? const Icon(Icons.calendar_today)
-                    : IconButton(
-                        tooltip: 'Clear end date',
-                        onPressed: busy
-                            ? null
-                            : () => setState(() => end = null),
-                        icon: const Icon(Icons.clear),
-                      ),
-                onTap: busy
-                    ? null
-                    : () async {
-                        final today = dateOnly(DateTime.now());
-                        final date = await showDatePicker(
-                          context: context,
-                          initialDate: end ?? today,
-                          firstDate: DateTime(2000),
-                          lastDate: DateTime(2100),
-                        );
-                        if (date != null && mounted) {
-                          setState(() => end = date);
-                        }
-                      },
-              ),
-              right: SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(type == EntryType.income ? 'Asset' : 'Liability'),
-                value: type == EntryType.income ? isAsset : isLiability,
-                onChanged: busy
-                    ? null
-                    : (value) => setState(() {
-                        if (type == EntryType.income) {
-                          isAsset = value;
-                        } else {
-                          isLiability = value;
-                        }
-                      }),
-              ),
-            ),
-            if (error != null)
-              Text(
-                error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-          ],
+          validator: (s) =>
+              s == null || s.trim().isEmpty ? 'Enter a description.' : null,
         ),
-      ),
+        const SizedBox(height: 16),
+        DropdownButtonFormField<int>(
+          key: ValueKey('account-$type'),
+          initialValue:
+              widget.store.accounts.any(
+                (a) =>
+                    a.id == accountId &&
+                    (type == EntryType.income || a.available),
+              )
+              ? accountId
+              : null,
+          decoration: InputDecoration(
+            labelText: type == EntryType.income
+                ? 'Receiving account'
+                : 'Payment account',
+          ),
+          items: widget.store.accounts
+              .where((a) => type == EntryType.income || a.available)
+              .map((a) => DropdownMenuItem(value: a.id, child: Text(a.name)))
+              .toList(),
+          onChanged: busy ? null : (value) => setState(() => accountId = value),
+          validator: (value) => value == null
+              ? 'Select an account for this recurring entry.'
+              : null,
+        ),
+        const SizedBox(height: 16),
+        ResponsivePair(
+          left: DropdownButtonFormField<int>(
+            initialValue: day,
+            decoration: const InputDecoration(labelText: 'Day of month'),
+            items: List.generate(
+              31,
+              (i) => DropdownMenuItem(value: i + 1, child: Text('${i + 1}')),
+            ),
+            onChanged: busy ? null : (value) => setState(() => day = value!),
+          ),
+          right: TextFormField(
+            controller: interval,
+            enabled: !busy,
+            decoration: const InputDecoration(labelText: 'Every N months'),
+            keyboardType: TextInputType.number,
+            validator: (s) {
+              final n = int.tryParse(s ?? '');
+              return n == null || n < 1 || n > 120
+                  ? 'Use 1 to 120 months.'
+                  : null;
+            },
+          ),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text('Start on or after: ${dayKey(start)}'),
+          subtitle: Text(
+            'First scheduled payment: ${dayKey(firstMonthlyDate(start, day))}',
+          ),
+          trailing: const Icon(Icons.calendar_today),
+          onTap: busy
+              ? null
+              : () async {
+                  final today = dateOnly(DateTime.now());
+                  final date = await showDatePicker(
+                    context: context,
+                    initialDate: start.isBefore(today) ? today : start,
+                    firstDate: today,
+                    lastDate: DateTime(2100),
+                  );
+                  if (date != null && mounted) {
+                    setState(() => start = date);
+                  }
+                },
+        ),
+        ResponsivePair(
+          left: ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(
+              end == null ? 'End date: none' : 'End date: ${dayKey(end!)}',
+            ),
+            trailing: end == null
+                ? const Icon(Icons.calendar_today)
+                : IconButton(
+                    tooltip: 'Clear end date',
+                    onPressed: busy ? null : () => setState(() => end = null),
+                    icon: const Icon(Icons.clear),
+                  ),
+            onTap: busy
+                ? null
+                : () async {
+                    final today = dateOnly(DateTime.now());
+                    final date = await showDatePicker(
+                      context: context,
+                      initialDate: end ?? today,
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime(2100),
+                    );
+                    if (date != null && mounted) {
+                      setState(() => end = date);
+                    }
+                  },
+          ),
+          right: SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(type == EntryType.income ? 'Asset' : 'Liability'),
+            value: type == EntryType.income ? isAsset : isLiability,
+            onChanged: busy
+                ? null
+                : (value) => setState(() {
+                    if (type == EntryType.income) {
+                      isAsset = value;
+                    } else {
+                      isLiability = value;
+                    }
+                  }),
+          ),
+        ),
+        if (error != null)
+          Text(
+            error!,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+      ],
     ),
   );
 }

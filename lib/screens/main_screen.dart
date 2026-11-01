@@ -9,6 +9,7 @@ import '../core/data/ledger_store.dart';
 import '../core/domain/ledger.dart';
 import '../core/domain/number_format.dart';
 import '../core/presentation/ledger_refresh.dart';
+import '../core/presentation/app_sheet.dart';
 import '../core/presentation/busy_label.dart';
 import '../core/presentation/retained_page.dart';
 import '../core/presentation/transaction_tile.dart';
@@ -317,15 +318,21 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         return;
       }
       if (_openingTransaction) setState(() => _openingTransaction = false);
-      final saved = await Navigator.of(context).push<bool>(
-        MaterialPageRoute<bool>(
-          builder: (_) => receipt == null
-              ? TransactionForm(
-                  store: widget.store,
-                  entry: entry,
-                  initialType: initialType,
-                )
-              : InvoiceReviewScreen(
+      var savedType = initialType;
+      final saved = receipt == null
+          ? await showAppSheet<bool>(
+              context,
+              editor: true,
+              builder: (_) => TransactionForm(
+                store: widget.store,
+                entry: entry,
+                initialType: initialType,
+                onSavedType: (type) => savedType = type,
+              ),
+            )
+          : await Navigator.of(context).push<bool>(
+              MaterialPageRoute(
+                builder: (_) => InvoiceReviewScreen(
                   store: widget.store,
                   entry: entry,
                   draft: InvoiceDraft.fromMap(
@@ -336,10 +343,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                     receipt['image_paths'] as String,
                   ) as List).cast<String>(),
                 ),
-        ),
-      );
+              ),
+            );
       if (saved == true && mounted) {
-        _goHome(type: entry == null ? initialType : null);
+        _goHome(type: entry == null ? savedType : null);
       }
     } catch (_) {
       if (mounted) {

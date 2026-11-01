@@ -21,6 +21,20 @@ Future<void> selectCsvCard(
   String prefix,
   String value,
 ) async {
+  if (prefix == 'csv-type') {
+    if (value == 'all') return; // Legacy fixture assigns its one type in one apply.
+    await tester.tap(find.byKey(const ValueKey('csv-type-picker')));
+    await tester.pumpAndSettle();
+    if (find.text('All types').evaluate().isNotEmpty &&
+        tester.widget<ListTile>(find.byKey(const ValueKey('entry-type-all'))).selected && value == 'expense') {
+      await tester.tap(find.byKey(const ValueKey('entry-type-all')));
+    }
+    await tester.tap(find.byKey(ValueKey('entry-type-$value')));
+    await tester.tap(find.text('Apply types'));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 250)));
+    await tester.pumpAndSettle();
+    return;
+  }
   final row = find.byKey(ValueKey('$prefix-options'));
   final scrollable = find.descendant(
     of: row,

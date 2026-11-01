@@ -1,3 +1,5 @@
+import 'helpers/sheet_helpers.dart';
+
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -219,7 +221,7 @@ void main() {
       await tester.tap(find.text('Save category'));
       await tester.pumpAndSettle();
       expect(find.text('Enter a category name.'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('category-kind-income')));
+      await chooseEntryType(tester, 'income');
       await tester.enterText(
         find.widgetWithText(TextFormField, 'Category name'),
         'Streaming income',
@@ -257,7 +259,12 @@ void main() {
         (c) => c.name == 'Groceries',
       );
       await launch(tester, category: grocery);
-      await tester.tap(find.byKey(const ValueKey('category-kind-income')));
+      expect(
+        tester
+            .widget<ListTile>(find.byKey(const ValueKey('type-picker')))
+            .enabled,
+        isFalse,
+      );
       await tester.enterText(
         find.widgetWithText(TextFormField, 'Category name'),
         'Dining out',
@@ -273,7 +280,7 @@ void main() {
         find.widgetWithText(TextFormField, 'Category name'),
         'Cancelled draft',
       );
-      await tester.pageBack();
+      await closeTopPage(tester);
       await tester.pumpAndSettle();
       expect(
         store.categories.singleWhere((c) => c.id == grocery.id).name,

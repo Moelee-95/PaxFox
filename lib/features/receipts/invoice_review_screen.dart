@@ -5,9 +5,11 @@ import 'package:flutter/material.dart';
 import '../../core/data/ledger_store.dart';
 import '../../core/domain/ledger.dart';
 import '../../core/presentation/account_picker.dart';
+import '../../core/presentation/category_picker.dart';
+import '../../core/presentation/app_sheet.dart';
+import '../../core/presentation/entry_editor_sheet.dart';
 import '../../core/presentation/bottom_action_bar.dart';
 import '../../core/presentation/confirmation_dialog.dart';
-import '../../core/presentation/grouped_amount_formatter.dart';
 import '../../core/presentation/info_button.dart';
 import 'invoice.dart';
 import 'invoice_image_preview.dart';
@@ -95,17 +97,15 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
   }
 
   Future<void> editItem([int? index]) async {
-    final result = await showDialog<InvoiceItem>(
-      context: context,
-      builder: (_) => InvoiceItemDialog(
+    final result = await showAppSheet<InvoiceItem>(
+      context,
+      editor: true,
+      builder: (_) => InvoiceItemSheet(
         item: index == null ? null : items[index],
         initialDate: date,
         currency: currency,
         type: type,
-        categories: widget.store
-            .categoriesFor(type)
-            .map((c) => c.name)
-            .toList(),
+        store: widget.store,
       ),
     );
     if (result != null && mounted) {
@@ -346,19 +346,13 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
                     ),
                   ),
                 ),
-              DropdownButtonFormField<String>(
-                initialValue: names.contains(category) ? category : null,
-                decoration: InputDecoration(
-                  labelText: income ? 'Income category' : 'Expense category',
-                ),
-                items: names
-                    .map(
-                      (name) =>
-                          DropdownMenuItem(value: name, child: Text(name)),
-                    )
-                    .toList(),
-                onChanged: busy ? null : (v) => setState(() => category = v),
-                validator: (s) => s == null ? 'Select a category.' : null,
+              CategoryPickerField(
+                store: widget.store,
+                type: type,
+                value: category,
+                label: income ? 'Income category' : 'Expense category',
+                enabled: !busy,
+                onChanged: (value) => setState(() => category = value.name),
               ),
               AccountPicker(
                 balances: widget.store.currentBalances.byAccount,
@@ -487,11 +481,11 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
   }
 }
 
-class InvoiceItemDialog extends StatefulWidget {
-  const InvoiceItemDialog({
+class InvoiceItemSheet extends StatefulWidget {
+  const InvoiceItemSheet({
     super.key,
     this.item,
-    required this.categories,
+    required this.store,
     this.currency = Currency.eur,
     this.initialDate,
     this.type = EntryType.expense,
@@ -500,12 +494,12 @@ class InvoiceItemDialog extends StatefulWidget {
   final EntryType type;
   final DateTime? initialDate;
   final InvoiceItem? item;
-  final List<String> categories;
+  final LedgerStore store;
   @override
-  State<InvoiceItemDialog> createState() => _InvoiceItemDialogState();
+  State<InvoiceItemSheet> createState() => _InvoiceItemSheetState();
 }
 
-class _InvoiceItemDialogState extends State<InvoiceItemDialog> {
+class _InvoiceItemSheetState extends State<InvoiceItemSheet> {
   final form = GlobalKey<FormState>();
   late final TextEditingController name = TextEditingController(
         text: widget.item?.description ?? '',
@@ -531,112 +525,86 @@ class _InvoiceItemDialogState extends State<InvoiceItemDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Review item'),
-    content: Form(
-      key: form,
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextFormField(
-              controller: name,
-              decoration: const InputDecoration(labelText: 'Item name'),
-              validator: (s) =>
-                  s == null || s.trim().isEmpty ? 'Enter a name.' : null,
+  Widget build(BuildContext context) => Form(
+    key: form,
+    child: EntryEditorSheet(
+      title: 'Review item',
+      type: widget.type,
+      currency: widget.currency,
+      amount: price,
+      amountLabel: 'Price (${widget.currency.symbol.trim()})',
+      saveLabel: 'Apply item',
+      amountValidator: (s) {
+        try {
+          final amount = signed(s ?? '');
+          if (widget.type == EntryType.income && amount <= 0) {
+            return 'Enter a positive received amount.';
+          }
+        } on FormatException catch (e) {
+          return e.message;
+        }
+        return null;
+      },
+      categoryPicker: CategoryPickerField(
+        store: widget.store,
+        type: widget.type,
+        value: category,
+        header: true,
+        onChanged: (value) => setState(() => category = value.name),
+      ),
+      onSave: () {
+        if (form.currentState!.validate()) {
+          Navigator.pop(
+            context,
+            InvoiceItem(
+              description: name.text.trim(),
+              quantity: '1',
+              total: signed(price.text),
+              category: category,
+              edited: true,
+              date: date,
             ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: price,
-              inputFormatters: const [GroupedAmountFormatter()],
-              decoration: InputDecoration(
-                labelText: 'Price (${widget.currency.symbol.trim()})',
-              ),
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-                signed: true,
-              ),
-              validator: (s) {
-                try {
-                  final amount = signed(s ?? '');
-                  if (widget.type == EntryType.income && amount <= 0) {
-                    return 'Enter a positive received amount.';
-                  }
-                } on FormatException catch (e) {
-                  return e.message;
+          );
+        }
+      },
+      children: [
+        TextFormField(
+          controller: name,
+          decoration: const InputDecoration(labelText: 'Item name'),
+          validator: (s) =>
+              s == null || s.trim().isEmpty ? 'Enter a name.' : null,
+        ),
+        const SizedBox(height: 16),
+        FormField<DateTime>(
+          initialValue: date,
+          validator: (_) => date == null ? 'Choose an item date.' : null,
+          builder: (field) => InputDecorator(
+            decoration: InputDecoration(
+              labelText: widget.type == EntryType.income
+                  ? 'Income date'
+                  : 'Invoice date',
+              errorText: field.errorText,
+            ),
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(date == null ? 'Choose date' : dayKey(date!)),
+              trailing: const Icon(Icons.calendar_today),
+              onTap: () async {
+                final chosen = await showDatePicker(
+                  context: context,
+                  initialDate: date ?? DateTime.now(),
+                  firstDate: DateTime(1900),
+                  lastDate: DateTime(2100),
+                );
+                if (chosen != null && mounted) {
+                  setState(() => date = chosen);
+                  field.didChange(chosen);
                 }
-                return null;
               },
             ),
-            const SizedBox(height: 16),
-            FormField<DateTime>(
-              initialValue: date,
-              validator: (_) => date == null ? 'Choose an item date.' : null,
-              builder: (field) => InputDecorator(
-                decoration: InputDecoration(
-                  labelText: widget.type == EntryType.income
-                      ? 'Income date'
-                      : 'Invoice date',
-                  errorText: field.errorText,
-                ),
-                child: ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(date == null ? 'Choose date' : dayKey(date!)),
-                  trailing: const Icon(Icons.calendar_today),
-                  onTap: () async {
-                    final chosen = await showDatePicker(
-                      context: context,
-                      initialDate: date ?? DateTime.now(),
-                      firstDate: DateTime(1900),
-                      lastDate: DateTime(2100),
-                    );
-                    if (chosen != null && mounted) {
-                      setState(() => date = chosen);
-                      field.didChange(chosen);
-                    }
-                  },
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              initialValue: widget.categories.contains(category)
-                  ? category
-                  : null,
-              decoration: const InputDecoration(labelText: 'Item category'),
-              items: widget.categories
-                  .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                  .toList(),
-              onChanged: (v) => category = v,
-              validator: (s) => s == null ? 'Select a category.' : null,
-            ),
-          ],
+          ),
         ),
-      ),
+      ],
     ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Cancel'),
-      ),
-      FilledButton(
-        onPressed: () {
-          if (form.currentState!.validate()) {
-            Navigator.pop(
-              context,
-              InvoiceItem(
-                description: name.text.trim(),
-                quantity: '1',
-                total: signed(price.text),
-                category: category,
-                edited: true,
-                date: date,
-              ),
-            );
-          }
-        },
-        child: const Text('Apply item'),
-      ),
-    ],
   );
 }

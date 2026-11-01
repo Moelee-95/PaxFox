@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../core/presentation/selection_cards.dart';
+import '../core/presentation/entry_type_picker.dart';
 
 import '../core/data/ledger_store.dart';
 import '../core/data/transaction_csv.dart';
@@ -376,19 +377,33 @@ class _CsvScreenState extends State<CsvScreen> {
                     : Icons.account_balance_outlined,
               ),
               const SizedBox(height: 12),
-              _selectionGroup<EntryType>(
-                label: 'Transaction types',
-                allLabel: 'All types',
-                keyPrefix: 'csv-type',
-                options: EntryType.values,
-                selected: types,
-                title: (type) => _typeName(type),
-                icon: (type) => switch (type) {
-                  EntryType.expense => Icons.shopping_bag_outlined,
-                  EntryType.income => Icons.payments_outlined,
-                  EntryType.refund => Icons.undo,
-                  EntryType.transfer => Icons.swap_horiz,
-                },
+              ListTile(
+                key: const ValueKey('csv-type-picker'),
+                title: const Text('Transaction types'),
+                subtitle: Text(
+                  types.length == EntryType.values.length
+                      ? 'All types'
+                      : types.map(entryTypeLabel).join(', '),
+                ),
+                trailing: const Icon(Icons.expand_more),
+                onTap: busy
+                    ? null
+                    : () async {
+                        final selected = await showEntryTypes(
+                          context,
+                          selected: types,
+                          multiple: true,
+                        );
+                        if (selected == null || !mounted) return;
+                        await run(() async {
+                          setState(() {
+                            types
+                              ..clear()
+                              ..addAll(selected);
+                          });
+                          await parse();
+                        });
+                      },
               ),
               const SizedBox(height: 16),
               Wrap(

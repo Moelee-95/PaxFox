@@ -83,3 +83,21 @@ Validation: 181 passing tests, clean analyzer, successful release APK and checke
 No Android device was connected for the original 2026-10-31 pass. For a real-user workload, use `flutter run --profile -d <device-id>` with DevTools Performance: warm the app, switch tabs, scroll a long ledger, filter/search, then inspect slow build/raster frames. Compare the same fixture and actions before/after. Use a physical device in profile/release mode, as described by [Flutter's performance guidance](https://docs.flutter.dev/perf/ui-performance). The release artifact is `build/app/outputs/flutter-apk/app-release.apk`; the existing configuration still uses the debug signing key and is not a store-publishing setup.
 
 Validation for the 2026-11-01 month/loading changes: **203 passing tests** with `CAPTURE_UI=true`, clean analyzer, inspected light/dark/large-text layouts and a successful normal release build. Build identity was checked as `de.alhayali.moneva` after creating the isolated benchmark package. Transaction metadata now uses one wrapping text paragraph for both labeled timestamps, avoiding a separate date paragraph and wrapping layout per row.
+
+## Reusable sheets (2026-11-01)
+
+Category selection uses a lazy grid backed by the indexed category query. The 250-category regression test mounts fewer than 40 tappable cells initially. Shared entry editors bind text controllers directly instead of rebuilding the whole sheet on each keystroke, retain field identity across keyboard layout changes, and keep Save above the keyboard. These are structural improvements verified by widget tests, not new physical-device frame-time measurements. All 210 tests pass; analyzer and release build are clean.
+
+The Categories management screen also uses indexed per-kind lists and lazy card construction. The 250-category regression checks fewer than 25 mounted management rows, while retaining the picker grid limit. Expense/income tabs keep separate scroll positions; category edits use the existing transactional save path.
+
+## More/Cashflow freeze investigation (2026-11-01)
+
+The connected SM-S916B Android ANR at 15:52:45 came from a debug build. Symbolizing its engine stack with the matching debug symbols showed `dart::Isolate::PauseEventHandler`, `dart::Debugger::PauseException` and `dart::ThrowExceptionHelper` on the merged platform/UI thread; raster and SQLite threads were idle. This establishes a debugger exception pause, not a measured slow ledger query. The original Dart exception text was unavailable. After restarting the same debug build, repeated slow/fast More-to-Cashflow swipes did not reproduce a pause, including a VM-service Debug subscription with exception pausing enabled. A new widget regression checks repeated swipes and navigation taps interrupting partial drags; it passes without changing navigation behavior.
+
+The final production-ID release update preserved the installed data. Twenty More-to-Cashflow swipe cycles followed by a Home tap completed on the phone; Home rendered normally and Android last-ANR remained the original 15:52:45 event. This does not identify the original Dart exception or establish a general no-freeze guarantee. Local evidence: build/freeze-anr.txt, build/freeze-probe.log, build/outline-phone-home.png.
+
+## Monthly savings chart (2026-11-01)
+
+The reusable FL Chart card requests only the six visible existing monthly reports. Totals are already prepared/cached per snapshot, so touch selection and range navigation do not iterate the full ledger. Only the chart's local state rebuilds for touch selection; a repaint boundary isolates its paint work. Animations last 180ms and respect the system disable-animations setting. No new snapshot preprocessing, database query or persisted cache was introduced. These are structural bounds, not a new device frame-time benchmark.
+
+The denser chart revision always draws six months and uses FL Chart's native rod labels for permanent amounts (including zero/negative values). Redundant y-axis labels were removed so all six bar/month columns share the available width. Dense plot/month text caps scaling at 1.15 to keep columns legible; the exact-value summary retains the user's full text scaling. No additional report queries or canvas layers were added.

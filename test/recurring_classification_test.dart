@@ -1,3 +1,5 @@
+import 'helpers/sheet_helpers.dart';
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -108,7 +110,7 @@ void main() {
         tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
         isTrue,
       );
-      await tester.tap(find.text('Income').last);
+      await chooseEntryType(tester, 'income');
       await tester.pumpAndSettle();
       expect(find.text('Asset'), findsOneWidget);
       expect(
@@ -124,9 +126,9 @@ void main() {
         find.widgetWithText(TextFormField, 'Amount (€)'),
         '10',
       );
-      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await openCategoryPicker(tester);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Salary').last);
+      await chooseCategory(tester, 'Salary');
       await tester.pumpAndSettle();
       await tester.tap(find.byType(DropdownButtonFormField<int>).first);
       await tester.pumpAndSettle();

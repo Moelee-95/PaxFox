@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:moneva/core/domain/ledger.dart';
 import 'package:moneva/core/domain/ledger_queries.dart';
 import 'package:moneva/core/presentation/entry_type_picker.dart';
-import 'package:moneva/core/presentation/selection_cards.dart';
 import 'package:moneva/screens/home_screen.dart';
 
 void main() {
@@ -187,39 +186,17 @@ void main() {
     },
   );
 
-  testWidgets(
-    'transaction type cards stay in one horizontal row and scroll to all options',
-    (tester) async {
-      EntryType? value = EntryType.expense;
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: Align(
-              alignment: Alignment.topLeft,
-              child: SizedBox(
-                width: 320,
-                child: StatefulBuilder(
-                  builder: (context, setState) => EntryTypePicker(
-                    value: value,
-                    onChanged: (type) => setState(() => value = type),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      final expense = find.byKey(const ValueKey('entry-type-expense'));
-      final income = find.byKey(const ValueKey('entry-type-income'));
-      expect(tester.getTopLeft(expense).dy, tester.getTopLeft(income).dy);
-      expect(tester.getSize(find.byType(SelectionRow)).height, 56);
-      await tester.drag(find.byType(ListView), const Offset(-600, 0));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('entry-type-transfer')));
-      await tester.pumpAndSettle();
-      expect(value, EntryType.transfer);
-      expect(tester.takeException(), isNull);
-    },
-  );
+  testWidgets('transaction type field opens a reusable selection sheet', (tester) async {
+    EntryType? value = EntryType.expense;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: StatefulBuilder(
+      builder: (context, update) => EntryTypePicker(value: value,
+        onChanged: (type) => update(() => value = type)),
+    ))));
+    await tester.tap(find.byKey(const ValueKey('type-picker')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('entry-type-transfer')));
+    await tester.pumpAndSettle();
+    expect(value, EntryType.transfer);
+    expect(tester.takeException(), isNull);
+  });
 }

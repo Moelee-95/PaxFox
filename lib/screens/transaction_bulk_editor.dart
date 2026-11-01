@@ -5,6 +5,7 @@ import '../core/domain/category.dart';
 import '../core/domain/ledger.dart';
 import '../core/domain/number_format.dart';
 import '../core/presentation/confirmation_dialog.dart';
+import '../core/presentation/category_picker.dart';
 
 enum TransactionBulkAction { category, account, delete }
 
@@ -47,22 +48,14 @@ class TransactionBulkEditor {
           'Select income separately from expenses and refunds to change categories.',
         );
       }
-      final category = await showDialog<String>(
-        context: context,
-        builder: (context) => SimpleDialog(
-          title: const Text('Change category'),
-          children: [
-            for (final category in store.categoriesFor(entries.first.type))
-              SimpleDialogOption(
-                onPressed: () => Navigator.pop(context, category.name),
-                child: Text(category.name),
-              ),
-          ],
-        ),
+      final category = await showCategoryPicker(
+        context,
+        store: store,
+        type: entries.first.type,
       );
       if (category == null || !context.mounted) return false;
       onSaving();
-      await store.updateEntries(ids, category: category);
+      await store.updateEntries(ids, category: category.name!);
       return true;
     }
 

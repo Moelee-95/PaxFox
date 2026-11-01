@@ -1,15 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../core/data/ledger_store.dart';
-import '../core/domain/category.dart';
 import '../core/domain/ledger.dart';
 import '../core/presentation/account_picker.dart';
 import '../core/presentation/async_action.dart';
-import '../core/presentation/bottom_action_bar.dart';
-import '../core/presentation/category_icons.dart';
+import '../core/presentation/entry_editor_sheet.dart';
+import '../core/presentation/category_picker.dart';
 import '../core/presentation/confirmation_dialog.dart';
-import '../core/presentation/entry_type_picker.dart';
-import '../core/presentation/grouped_amount_formatter.dart';
 import '../core/presentation/transaction_tile.dart';
 import '../features/receipts/invoice_source_details.dart';
 
@@ -19,10 +16,12 @@ class TransactionForm extends StatefulWidget {
     required this.store,
     this.entry,
     this.initialType = EntryType.expense,
+    this.onSavedType,
   });
   final LedgerStore store;
   final LedgerEntry? entry;
   final EntryType initialType;
+  final ValueChanged<EntryType>? onSavedType;
   @override
   State<TransactionForm> createState() => _TransactionFormState();
 }
@@ -92,7 +91,10 @@ class _TransactionFormState extends State<TransactionForm> {
       ),
       failureMessage: 'Could not save. Check the fields and account currencies, then retry.',
     );
-    if (saved && mounted) Navigator.pop(context, true);
+    if (saved && mounted) {
+      widget.onSavedType?.call(type);
+      Navigator.pop(context, true);
+    }
   }
 
   Future<void> delete() async {
@@ -153,192 +155,118 @@ class _TransactionFormState extends State<TransactionForm> {
         : null,
   );
   @override
-  Widget build(BuildContext context) => Scaffold(
-    bottomNavigationBar: BottomActionBar(
-      label: 'Save transaction',
+  Widget build(BuildContext context) => Form(
+    key: form,
+    child: EntryEditorSheet(
+      title: widget.entry == null ? 'Add transaction' : 'Edit transaction',
+      type: type,
+      currency: currency,
+      amount: amount,
       busy: saving,
-      busyLabel: 'Saving…',
-      onPressed: save,
-    ),
-    appBar: AppBar(
-      title: Text(
-        widget.entry == null ? 'Add transaction' : 'Edit transaction',
+      saveLabel: 'Save transaction',
+      onSave: save,
+      amountValidator: (value) {
+        try {
+          if (currency.parseInput(value ?? '') <= 0) {
+            return 'Amount must be greater than zero.';
+          }
+        } on FormatException catch (error) {
+          return error.message;
+        }
+        return null;
+      },
+      categoryPicker: CategoryPickerField(
+        store: widget.store,
+        type: type,
+        value: category,
+        header: true,
+        enabled: !saving,
+        types: EntryType.values,
+        onChanged: (value) => setState(() {
+          type = value.type;
+          category = value.name;
+        }),
       ),
       actions: [
         if (widget.entry != null)
           IconButton(
             tooltip: 'Delete transaction',
             onPressed: saving ? null : delete,
+            color: Colors.white,
             icon: const Icon(Icons.delete_outline),
           ),
       ],
-    ),
-    body: Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 650),
-        child: Form(
-          key: form,
-          child: ListView(
-            padding: EdgeInsets.fromLTRB(
-              20,
-              20,
-              20,
-              24 + MediaQuery.paddingOf(context).bottom,
+      children: [
+        if (scannedInvoice != null)
+          InvoiceSourceDetails(
+            source: scannedInvoice!,
+            title: type == EntryType.income
+                ? 'Income document'
+                : 'Scanned invoice',
+          ),
+        if (widget.entry?.createdAt != null)
+          Text('Added ${creationTimestamp(context, widget.entry!.createdAt!)}'),
+        TextFormField(
+          controller: description,
+          enabled: !saving,
+          decoration: const InputDecoration(
+            labelText: 'Description / merchant',
+          ),
+          validator: (s) =>
+              s == null || s.trim().isEmpty ? 'Enter a description.' : null,
+        ),
+        const SizedBox(height: 12),
+        accountField(false),
+        if (type == EntryType.transfer) accountField(true),
+        const SizedBox(height: 12),
+        Card(
+          child: ListTile(
+            title: Text('Date: ${dayKey(date)}'),
+            leading: const Icon(Icons.calendar_today),
+            trailing: TextButton(
+              onPressed: saving
+                  ? null
+                  : () => setState(() {
+                      final today = DateTime.now();
+                      date = DateTime(today.year, today.month, today.day - 1);
+                    }),
+              child: const Text('Yesterday'),
             ),
-            children: [
-              if (scannedInvoice != null)
-                InvoiceSourceDetails(
-                  source: scannedInvoice!,
-                  title: type == EntryType.income
-                      ? 'Income document'
-                      : 'Scanned invoice',
-                ),
-              if (widget.entry?.createdAt != null)
-                Text(
-                  'Added ${creationTimestamp(context, widget.entry!.createdAt!)}',
-                ),
-              EntryTypePicker(
-                value: type,
-                onChanged: saving
-                    ? null
-                    : (t) => setState(() {
-                        if (categoryKind(type) != categoryKind(t!)) {
-                          category = null;
-                        }
-                        type = t;
-                      }),
-              ),
-              TextFormField(
-                controller: description,
-                enabled: !saving,
-                decoration: const InputDecoration(
-                  labelText: 'Description / merchant',
-                ),
-                validator: (s) => s == null || s.trim().isEmpty
-                    ? 'Enter a description.'
-                    : null,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: amount,
-                inputFormatters: const [GroupedAmountFormatter()],
-                enabled: !saving,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                decoration: InputDecoration(
-                  labelText: 'Amount',
-                  prefixText: '${currency.symbol.trim()} ',
-                ),
-                validator: (s) {
-                  try {
-                    if (currency.parseInput(s ?? '') <= 0) {
-                      return 'Amount must be greater than zero.';
+            onTap: saving
+                ? null
+                : () async {
+                    final chosen = await showDatePicker(
+                      context: context,
+                      initialDate: date,
+                      firstDate: DateTime(1900),
+                      lastDate: DateTime(2100),
+                    );
+                    if (chosen != null && mounted) {
+                      setState(() => date = chosen);
                     }
-                  } on FormatException catch (e) {
-                    return e.message;
-                  }
-                  return null;
-                },
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text('Date: ${dayKey(date)}'),
-                trailing: const Icon(Icons.calendar_today),
-                onTap: saving
-                    ? null
-                    : () async {
-                        final chosen = await showDatePicker(
-                          context: context,
-                          initialDate: date,
-                          firstDate: DateTime(1900),
-                          lastDate: DateTime(2100),
-                        );
-                        if (chosen != null && mounted) {
-                          setState(() => date = chosen);
-                        }
-                      },
-              ),
-              if (type != EntryType.transfer)
-                DropdownButtonFormField<String>(
-                  isExpanded: true,
-                  key: ValueKey(
-                    '$type-$category-${widget.store.categories.map((c) => c.name).join('|')}',
-                  ),
-                  initialValue:
-                      widget.store
-                          .categoriesFor(type)
-                          .any((c) => c.name == category)
-                      ? category
-                      : null,
-                  decoration: InputDecoration(
-                    labelText: type == EntryType.income
-                        ? 'Income category'
-                        : 'Expense category',
-                  ),
-                  items: widget.store
-                      .categoriesFor(type)
-                      .map(
-                        (c) => DropdownMenuItem(
-                          value: c.name,
-                          child: Row(
-                            children: [
-                              categoryGlyph(
-                                categoryIconData(c.icon),
-                                color: c.color == null ? null : Color(c.color!),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  c.name,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: saving
-                      ? null
-                      : (value) => setState(() => category = value),
-                  validator: (value) =>
-                      value == null ? 'Select a category.' : null,
-                ),
-              accountField(false),
-              if (type == EntryType.transfer) accountField(true),
-              if (widget.store.accounts.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12),
-                  child: Text(
-                    'Create accounts from Home before recording transfers.',
-                  ),
-                ),
-              TextFormField(
-                controller: notes,
-                enabled: !saving,
-                decoration: const InputDecoration(labelText: 'Notes'),
-                maxLines: 3,
-              ),
-              if (error != null)
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Text(
-                    error!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
-                ),
-              const SizedBox(height: 24),
-              TextButton(
-                onPressed: saving ? null : () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-            ],
+                  },
           ),
         ),
-      ),
+        const SizedBox(height: 12),
+        TextFormField(
+          controller: notes,
+          enabled: !saving,
+          decoration: const InputDecoration(labelText: 'Notes'),
+          maxLines: 3,
+        ),
+        if (error != null)
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text(
+              error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
+        TextButton(
+          onPressed: saving ? null : () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ],
     ),
   );
 }

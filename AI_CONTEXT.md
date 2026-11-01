@@ -18,21 +18,21 @@ Setup: currency + cash -> banks/no-bank -> review + optional debts -> main shell
 Main bottom tabs: Home | Overview | Cashflow | More (three-dot icon; Back twice within 2 seconds to exit)
   Home: month pager + three tabs: Expenses/refunds | Income | compact info icon (Monthly overview); header amounts omit fractional units; normal tab taps and horizontal swipes; swipe left from the info tab to continue to main Overview
   Monthly overview category cards -> inline matching expenses/refunds; on-screen/system Back returns to categories (system Back clears active selection first); editing and bulk selection
-  Overview: prominent wealth/spendable totals + compact editable account cards + compact highlighted debts
+  Overview: prominent wealth/spendable totals + compact editable account cards + compact highlighted debts + interactive monthly net-savings chart (FL Chart; six months with permanent amount labels)
   Cashflow: empty placeholder for future functionality
   Transactions: all-date search + type filter
 More: editable local user card + searchable All transactions, Categories, Accounts, Recurring, CSV, Settings cards; Home is only in bottom navigation
   Support: Help & FAQ, Rate App, Changelog, Privacy Policy, Terms and Conditions, About (actions deferred)
   All transactions replaces content; app-bar/system Back restores More
-  Management screens push routes; Back returns to More; no side drawer
+  Management screens push routes; transaction, recurring and scanned-item editors use bottom sheets; no side drawer
   Accounts -> AccountForm (unused banks can be deleted); Categories -> full-page add/edit, 21 color swatches + searchable grouped icons (including brands), pinned Save and header check
-  Recurring -> RecurringForm; unpaid history -> retry/skip
-  CSV -> multi-select account/type cards; one nine-column file preserves mixed assignments and transfers; legacy five-column imports require one account/type
+  Recurring -> RecurringForm bottom sheet; unpaid history -> retry/skip
+  CSV -> multi-select account cards and type bottom sheet; one nine-column file preserves mixed assignments and transfers; legacy five-column imports require one account/type
 Floating + stays unchanged -> white modal backdrop with Expense left / Income right; each has Add manually / Scan / Upload file; close stays at + position
-  Manual -> TransactionForm preselected for chosen type
+  Manual -> TransactionForm bottom sheet with colored category/type and amount header, preselected type and pinned Save
   Scan/upload -> camera, images or PDF -> preparation -> Extract -> expense/income review
-  Review -> item edit dialogs -> atomic save -> matching Home expense/income tab
-Existing entry -> TransactionForm, except legacy single-expense receipts -> invoice review
+  Review -> item edit bottom sheets -> atomic save -> matching Home expense/income tab
+Existing entry -> TransactionForm bottom sheet, except legacy single-expense receipts -> invoice review
 Long-press entries -> bulk category/account/delete actions
 Transaction rows: rounded cards with the description in bold, saved category-color icon circle, visible localized Added on timestamp below and a separately labeled transaction date; no category-name heading or creation-time info button. Slightly larger 34px badges, 20px glyphs and 16px headings/prices. Expense price red with minus, income/refund green with plus, transfer blue without income/expense sign. Home expense/income tabs stay separate.
 ```
@@ -43,6 +43,7 @@ Transaction rows: rounded cards with the description in bold, saved category-col
 - Main destinations and Home's inner tabs mount lazily and retain their controllers/scroll position. Cached page widgets listen to store/view changes independently of shell navigation; inactive main pages have tickers disabled. More search also survives tab changes. More, account/debt lists and monthly category reports build rows lazily.
 - `core/data/ledger_store.dart` is the injected `ChangeNotifier`, public data/write boundary. Commits reload a complete read-only snapshot. If that reload fails, `StoreStatus` offers a reload and blocks stale interactions without repeating the committed write. Failed reads retain the last complete snapshot.
 - The optional local profile uses `profile_name` and `profile_email` in existing settings (no schema bump); `saveProfile` saves both atomically. It is not a login and is not sent for invoice extraction. More's support options are visual placeholders by user request; no support actions, authentication or logout are implemented.
+- Category sheets share lazy saved-color/icon grids, contextual type switching and add actions; Edit opens Categories on the matching kind, then Back returns to the picker. Categories uses lazy rounded cards, numbered badges and an app-bar add button. Manual forms allow expense/income/refund/transfer; recurring is expense/income only; scan-review/item-review forms and bulk category changes retain their financial type. Type-only fields use a shared single/multi-select sheet (CSV preserves multi-selection). `EntryEditorSheet` shares keyboard-aware layout, pinned Save and protected pending writes. Category renames are handed back to drafts by stable category ID.
 - Categories store stable icon IDs and an optional opaque ARGB color. Schema 13 adds nullable `categories.color`; transaction rows use saved color for the icon badge and a neutral fallback when unset. Price color/sign reflects transaction type independently. CategoryForm supports expense/income selection for new categories; existing kind stays fixed. Custom colors appear in category lists, transaction badges, manual category options and monthly reports. The catalog retains 92 original icons and adds 21 icons (including Font Awesome brands); assets are bundled for offline use.
 - `core/data/ledger_database.dart` owns schema/migrations; `core/domain/` owns money and schedules. UI components live in `core/presentation/`; invoice code in `features/receipts/`.
 - UI amounts use comma thousands grouping (1,234.56), including editable money fields; CSV/extraction serialization stays ungrouped.
@@ -82,6 +83,20 @@ Validation on 2026-11-01 after multi-account/type CSV: **190 passing tests** wit
 Validation on 2026-11-01 after split creation menu and income documents: **197 passing tests**, clean analyzer and successful release APK. New coverage checks income parsing/filtering, PDF MIME/bytes and cleanup, positive income validation, blocked receiving accounts, source edit/delete, manual Income routing, and two-column menu accessibility at 320px/1.8x text. Native file/camera providers and live Gemini classification remain unverified.
 
 Validation on 2026-11-01 after month navigation/loading improvements: **203 passing tests** with `CAPTURE_UI=true`, clean analyzer and successful release APK with the unchanged production package ID. Coverage includes rapid month taps/swipes/year changes, hidden-tab row deferral/freshness, prepared/lazy report equivalence, loading feedback without retained-content rebuilds, and financial/recovery regressions. On the connected SM-S916B/60Hz with 24,000 synthetic entries, final build p95 was 14.905ms for transaction month changes, 8.957ms for report changes and 1.532ms for warmed main navigation; some transaction frames still exceeded the frame budget. The separate in-memory benchmark package was removed afterward. See PERFORMANCE for full results and limits.
+
+Validation on 2026-11-01 after reusable category/type and entry editor sheets: **210 passing tests** with `CAPTURE_UI=true`, clean analyzer and successful release APK. Coverage includes selection cancellation, contextual type restrictions, category creation/renaming, staged CSV type selection, transfer/refund selection, lazy rendering of 250 categories, and keyboard-safe 320px/1.8x text layouts. Rendered expense/income, category grids and dark/keyboard layouts were inspected. No persisted schema or financial rules changed.
+
+Validation on 2026-11-01 after category management cards: **210 passing tests**, clean analyzer and successful release APK. Picker Edit opens the matching Categories tab; return/rename retention, lazy management rows, light/dark cards and narrow large-text layouts were verified. No data schema or financial rules changed.
+
+Brand theme validation on 2026-11-01: the 210-test regression run passed 209 tests with one obsolete hardcoded blue-color expectation. After updating that expectation, all 7 focused theme/recurring tests passed (including 2 new light/dark contrast tests). Analyzer and release APK build passed. Rendered More/editor/category screens were checked in light/dark and narrow large-text layouts. No navigation, data or financial rules changed.
+
+Outline theme validation on 2026-11-01: **213 tests passed**, followed by 14 focused theme/sheet/More tests after the final icon-style adjustment; analyzer and release build passed. Orange fills were replaced with neutral surfaces and orange borders for primary buttons/FABs. Installed release was checked with 20 More-to-Cashflow swipe cycles and a responsive return Home; no new ANR. The reported original debug ANR was symbolized as a debugger pause on an exception; exact Dart exception remains unknown. See PERFORMANCE.
+
+Theme rollback on 2026-11-01: restored the original blue/neutral light and dark themes, standard buttons/navigation, multicolor More options and purple sheet actions at the user's request. Brand/orange theme experiments above are historical and no longer apply. Navigation regression coverage is retained.
+
+Monthly savings validation on 2026-11-01: **216 tests passed** with `CAPTURE_UI=true`, clean analyzer and successful release APK (64.6MB). New coverage checks net/refund/transfer/currency rules, real bar taps, month/year paging, zero data, refreshed snapshots and dark 320px/1.8x IQD layouts. Light/dark previews inspected. Release installed preserving data; on-device chart visual inspection was unavailable because the screen was off. No schema change.
+
+Six-month chart revision on 2026-11-01: all six months remain visible at narrow widths and large text, with permanent compact amount labels on every bar, including zero/negative values. Exact currency values remain available in the selected summary/tooltips. Six focused chart/navigation tests pass; analyzer and release build pass. Light/dark narrow previews inspected. The updated APK has not been installed because no Android device was connected at completion.
 
 Camera and live Gemini remain unverified. iOS and production signing/publishing were not verified; release currently uses the existing debug signing key. Support actions remain deferred. No full backup/restore, web support, bank integration or cloud sync exists.
 
