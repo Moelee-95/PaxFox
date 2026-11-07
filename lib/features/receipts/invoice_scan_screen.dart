@@ -122,6 +122,7 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
       error = null;
     });
     Directory? uploadSources;
+    final preparationTasks = <Future<File>>[];
     try {
       List<String>? paths;
       if (upload && widget.uploadPicker != null) {
@@ -203,6 +204,7 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
           try {
             var expired = false;
             final pending = _imagePreparation.prepare(File(pages[i]));
+            preparationTasks.add(pending);
             // A stuck native/file/decoder operation must never trap the screen.
             unawaited(
               pending.then((file) {
@@ -215,6 +217,7 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
               widget.preparationTimeout,
               onTimeout: () {
                 expired = true;
+                _imagePreparation.cancelPending();
                 throw TimeoutException('Image preparation timed out.');
               },
             );
@@ -252,11 +255,24 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
       }
     } finally {
       if (uploadSources != null) {
-        try {
-          await uploadSources.delete(recursive: true);
-        } catch (_) {
-          /* Owned temporary copies only. */
-        }
+        final directory = uploadSources;
+        // A timeout stops waiting, not the OS file read. Keep picker copies
+        // alive until the active job settles; discard its result on cancellation.
+        unawaited(() async {
+          await Future.wait(
+            preparationTasks.map(
+              (task) => task.then<void>(
+                (_) {},
+                onError: (Object _, StackTrace _) {},
+              ),
+            ),
+          );
+          try {
+            await directory.delete(recursive: true);
+          } catch (_) {
+            /* Owned temporary copies only. */
+          }
+        }());
       }
       if (mounted && currentCapture == captureId) {
         setState(() {
@@ -312,6 +328,10 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
     activeExtractor =
         widget.extractor ??
         GeminiInvoiceExtractor(
+          configUrl: widget.store.geminiConfigUrl,
+          manualKey: widget.store.geminiUseManualKey
+              ? widget.store.geminiManualKey
+              : null,
           timeout: timeout,
           currency: widget.store.currency,
           type: widget.type,
@@ -426,6 +446,7 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
               TextButton.icon(
                 onPressed: () => setState(() {
                   captureId++;
+                  _imagePreparation.cancelPending();
                   busy = false;
                   _preparationStage = null;
                   error = 'Image preparation cancelled.';

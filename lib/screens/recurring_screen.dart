@@ -19,7 +19,7 @@ const _recurringInfo =
 const _recurringHistoryInfo =
     'Unpaid occurrences keep their original amount and account. Retry books the payment on today\'s date and preserves its scheduled due date in this history. Editing a rule affects future occurrences only. If a posted payment is edited or deleted in Transactions, it is never automatically recreated.';
 const _recurringFormInfo =
-    'Expenses and income repeat monthly in your app currency. Future changes do not alter already posted payments or unpaid bills. Choose a start date today or later; past transactions do not create recurring rules.';
+    'Expenses and income repeat monthly in the chosen app or account currency. Future changes do not alter already posted payments or unpaid bills. Choose a start date today or later; past transactions do not create recurring rules.';
 
 class RecurringScreen extends StatefulWidget {
   const RecurringScreen({super.key, required this.store});
@@ -136,7 +136,7 @@ class _RecurringScreenState extends State<RecurringScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '${rule.type == EntryType.income ? 'Income' : 'Expense'} - ${widget.store.currency.display(rule.amount)} - ${widget.store.accounts.where((a) => a.id == rule.accountId).firstOrNull?.name ?? 'Account unavailable'}',
+                            '${rule.type == EntryType.income ? 'Income' : 'Expense'} - ${(rule.currency ?? widget.store.currency).display(rule.amount)} - ${widget.store.accounts.where((a) => a.id == rule.accountId).firstOrNull?.name ?? 'Account unavailable'}',
                           ),
                           Text(
                             '${rule.active ? 'Next' : 'Paused; scheduled'}: ${dayKey(rule.nextDate)} - every ${rule.interval} month(s), day ${rule.day}',
@@ -191,7 +191,7 @@ class _RecurringScreenState extends State<RecurringScreen> {
                   children: [
                     ListTile(
                       title: Text(
-                        '${occurrence.description} - ${widget.store.currency.symbol}${widget.store.currency.formatGrouped(occurrence.amount)}',
+                        '${occurrence.description} - ${(occurrence.currency ?? widget.store.currency).display(occurrence.amount)}',
                       ),
                       subtitle: Text(
                         '${occurrence.type.name} - ${dayKey(occurrence.date)} - ${occurrence.status == 'posted' && occurrence.transactionId == null ? 'Posted, then deleted manually' : occurrence.status}${occurrence.error == null ? '' : '\n${occurrence.error}'}',
@@ -276,6 +276,7 @@ class _RecurringFormState extends State<RecurringForm> {
   late final TextEditingController description, amount, interval;
   int? accountId;
   late EntryType type;
+  late Currency inputCurrency;
   String? category;
   late int day;
   late DateTime start;
@@ -288,11 +289,10 @@ class _RecurringFormState extends State<RecurringForm> {
   void initState() {
     super.initState();
     final rule = widget.rule;
+    inputCurrency = rule?.currency ?? widget.store.currency;
     description = TextEditingController(text: rule?.description ?? '');
     amount = TextEditingController(
-      text: rule == null
-          ? ''
-          : widget.store.currency.formatGrouped(rule.amount),
+      text: rule == null ? '' : inputCurrency.formatGrouped(rule.amount),
     );
     interval = TextEditingController(text: '${rule?.interval ?? 1}');
     type = rule?.type ?? EntryType.expense;
@@ -326,7 +326,8 @@ class _RecurringFormState extends State<RecurringForm> {
           isAsset: type == EntryType.income && isAsset,
           isLiability: type == EntryType.expense && isLiability,
           description: description.text.trim(),
-          amount: widget.store.currency.parseInput(amount.text),
+          amount: inputCurrency.parseInput(amount.text),
+          currency: inputCurrency,
           category: category!,
           accountId: accountId!,
           day: day,
@@ -341,6 +342,9 @@ class _RecurringFormState extends State<RecurringForm> {
     if (saved && mounted) Navigator.pop(context);
   }
 
+  Account? get selectedAccount =>
+      widget.store.accounts.where((a) => a.id == accountId).firstOrNull;
+
   @override
   Widget build(BuildContext context) => Form(
     key: form,
@@ -349,15 +353,15 @@ class _RecurringFormState extends State<RecurringForm> {
           ? 'Add recurring payment'
           : 'Edit recurring payment',
       type: type,
-      currency: widget.store.currency,
+      currency: inputCurrency,
       amount: amount,
       busy: busy,
       saveLabel: 'Save recurring payment',
       onSave: save,
-      amountLabel: 'Amount (${widget.store.currency.symbol.trim()})',
+      amountLabel: 'Amount (${inputCurrency.symbol.trim()})',
       amountValidator: (s) {
         try {
-          if (widget.store.currency.parseInput(s ?? '') <= 0) {
+          if (inputCurrency.parseInput(s ?? '') <= 0) {
             return 'Enter an amount greater than zero.';
           }
         } on FormatException catch (e) {
@@ -375,6 +379,7 @@ class _RecurringFormState extends State<RecurringForm> {
         onChanged: (value) => setState(() {
           if (type != value.type) {
             accountId = null;
+            inputCurrency = widget.store.currency;
             isAsset = false;
             isLiability = false;
           }
@@ -418,12 +423,78 @@ class _RecurringFormState extends State<RecurringForm> {
               .where((a) => type == EntryType.income || a.available)
               .map((a) => DropdownMenuItem(value: a.id, child: Text(a.name)))
               .toList(),
-          onChanged: busy ? null : (value) => setState(() => accountId = value),
+          onChanged: busy
+              ? null
+              : (value) => setState(() {
+                  int? base;
+                  try {
+                    final parsed = inputCurrency.parseInput(amount.text);
+                    base = inputCurrency == widget.store.currency
+                        ? parsed
+                        : selectedAccount?.toBase(parsed);
+                  } on FormatException {
+                    /* No complete amount yet. */
+                  }
+                  accountId = value;
+                  // Recurring entries default to the selected bank's native currency.
+                  inputCurrency = selectedAccount!.currency;
+                  if (base != null) {
+                    amount.text = inputCurrency.formatGrouped(
+                      selectedAccount!.fromBase(base),
+                    );
+                  }
+                }),
           validator: (value) => value == null
               ? 'Select an account for this recurring entry.'
               : null,
         ),
         const SizedBox(height: 16),
+        if (selectedAccount != null &&
+            selectedAccount!.currency != widget.store.currency) ...[
+          DropdownButtonFormField<Currency>(
+            key: ValueKey(('recurring-currency', inputCurrency, accountId)),
+            initialValue: inputCurrency,
+            decoration: const InputDecoration(
+              labelText: 'Recurring amount currency',
+            ),
+            items: [widget.store.currency, selectedAccount!.currency]
+                .map((c) => DropdownMenuItem(value: c, child: Text(c.code)))
+                .toList(),
+            onChanged: busy
+                ? null
+                : (value) => setState(() {
+                    try {
+                      final parsed = inputCurrency.parseInput(amount.text);
+                      final base = inputCurrency == widget.store.currency
+                          ? parsed
+                          : selectedAccount!.toBase(parsed);
+                      amount.text = value!.formatGrouped(
+                        value == widget.store.currency
+                            ? base
+                            : selectedAccount!.fromBase(base),
+                      );
+                    } on FormatException {
+                      /* Empty amount remains empty. */
+                    }
+                    inputCurrency = value!;
+                  }),
+          ),
+          const SizedBox(height: 8),
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: amount,
+            builder: (_, value, _) {
+              try {
+                final parsed = inputCurrency.parseInput(value.text);
+                return Text(
+                  'Current equivalent: ${widget.store.currency.display(inputCurrency == widget.store.currency ? parsed : selectedAccount!.toBase(parsed))}',
+                );
+              } on FormatException {
+                return const SizedBox.shrink();
+              }
+            },
+          ),
+          const SizedBox(height: 16),
+        ],
         ResponsivePair(
           left: DropdownButtonFormField<int>(
             initialValue: day,

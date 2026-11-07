@@ -28,7 +28,10 @@ class TransactionForm extends StatefulWidget {
 
 class _TransactionFormState extends State<TransactionForm> {
   final form = GlobalKey<FormState>();
-  late final TextEditingController amount, description, notes;
+  late final TextEditingController amount, description, notes, received;
+  late Currency originalInputCurrency;
+  late int originalInputAmount;
+  late String originalReceived;
   String? category;
   late EntryType type;
   late Currency currency;
@@ -53,9 +56,34 @@ class _TransactionFormState extends State<TransactionForm> {
     date = e?.date ?? dateOnly(DateTime.now());
     accountId = e?.accountId;
     destinationId = e?.destinationId;
+    final source = selectedAccount;
+    if (type == EntryType.transfer && source != null) {
+      currency = source.currency;
+      originalInputAmount = e?.accountAmount ?? e?.amount ?? 0;
+    } else {
+      final inputCurrency = e?.fx?.inputCurrency;
+      if (inputCurrency == widget.store.currency ||
+          inputCurrency == source?.currency) {
+        currency = inputCurrency ?? currency;
+        originalInputAmount = e?.fx?.inputAmount ?? e?.amount ?? 0;
+      } else {
+        originalInputAmount = e?.amount ?? 0;
+      }
+    }
+    originalInputCurrency = currency;
     amount = TextEditingController(
-      text: e == null ? '' : currency.formatGrouped(e.amount),
+      text: e == null ? '' : currency.formatGrouped(originalInputAmount),
     );
+    final receivedMinor =
+        e?.destinationAmount ??
+        (destinationAccount?.currency == e?.currency ? e?.amount : null);
+    received = TextEditingController(
+      text: receivedMinor == null
+          ? ''
+          : (destinationAccount?.currency ?? widget.store.currency)
+                .formatGrouped(receivedMinor),
+    );
+    originalReceived = received.text;
     description = TextEditingController(text: e?.description ?? '');
     category = e?.type == EntryType.transfer ? null : e?.category;
     notes = TextEditingController(text: e?.notes ?? '');
@@ -63,7 +91,7 @@ class _TransactionFormState extends State<TransactionForm> {
 
   @override
   void dispose() {
-    for (final c in [amount, description, notes]) {
+    for (final c in [amount, description, notes, received]) {
       c.dispose();
     }
     action.dispose();
@@ -75,20 +103,55 @@ class _TransactionFormState extends State<TransactionForm> {
       return;
     }
     final saved = await action.run(
-      () async => widget.store.saveEntry(
-        LedgerEntry(
-          id: widget.entry?.id,
-          type: type,
-          amount: currency.parseInput(amount.text),
-          currency: currency,
-          date: date,
-          description: description.text.trim(),
-          category: type == EntryType.transfer ? 'Transfer' : category!,
-          notes: notes.text.trim(),
-          accountId: accountId,
-          destinationId: type == EntryType.transfer ? destinationId : null,
-        ),
-      ),
+      () async {
+        final parsed = currency.parseInput(amount.text);
+        final old = widget.entry;
+        var sameReceived = received.text == originalReceived;
+        if (crossCurrencyTransfer) {
+          try {
+            sameReceived =
+                destinationAccount!.currency.parseInput(received.text) ==
+                destinationAccount!.currency.parseInput(originalReceived);
+          } on FormatException {
+            sameReceived = false;
+          }
+        }
+        final unchanged =
+            old != null &&
+            parsed == originalInputAmount &&
+            currency == originalInputCurrency &&
+            type == old.type &&
+            accountId == old.accountId &&
+            destinationId == old.destinationId &&
+            sameReceived;
+        final entry = unchanged
+            ? LedgerEntry.fromMap({
+                ...old.toMap(),
+                'id': old.id,
+                'date': dayKey(date),
+                'description': description.text.trim(),
+                'category': type == EntryType.transfer ? 'Transfer' : category!,
+                'notes': notes.text.trim(),
+              })
+            : widget.store.entryFromInput(
+                id: old?.id,
+                type: type,
+                inputAmount: parsed,
+                inputCurrency: currency,
+                date: date,
+                description: description.text.trim(),
+                category: type == EntryType.transfer ? 'Transfer' : category!,
+                notes: notes.text.trim(),
+                accountId: accountId,
+                destinationId: type == EntryType.transfer
+                    ? destinationId
+                    : null,
+                receivedAmount: crossCurrencyTransfer
+                    ? destinationAccount!.currency.parseInput(received.text)
+                    : null,
+              );
+        await widget.store.saveEntry(entry);
+      },
       failureMessage: 'Could not save. Check the fields and account currencies, then retry.',
     );
     if (saved && mounted) {
@@ -113,6 +176,66 @@ class _TransactionFormState extends State<TransactionForm> {
     if (deleted && mounted) Navigator.pop(context);
   }
 
+  Account? get selectedAccount =>
+      widget.store.accounts.where((a) => a.id == accountId).firstOrNull;
+  Account? get destinationAccount =>
+      widget.store.accounts.where((a) => a.id == destinationId).firstOrNull;
+  bool get crossCurrencyTransfer =>
+      type == EntryType.transfer &&
+      selectedAccount != null &&
+      destinationAccount != null &&
+      selectedAccount!.currency != destinationAccount!.currency;
+
+  void changeInputCurrency(Currency next) {
+    if (next == currency) return;
+    try {
+      final value = currency.parseInput(amount.text);
+      final base = currency == widget.store.currency
+          ? value
+          : selectedAccount!.toBase(value);
+      final converted = next == widget.store.currency
+          ? base
+          : selectedAccount!.fromBase(base);
+      amount.text = next.formatGrouped(converted);
+    } on FormatException {
+      /* Empty draft keeps its text until entered. */
+    }
+    currency = next;
+  }
+
+  Widget conversionPreview() => ValueListenableBuilder<TextEditingValue>(
+    valueListenable: amount,
+    builder: (context, value, _) {
+      try {
+        final parsed = currency.parseInput(value.text);
+        final account = selectedAccount!;
+        final old = widget.entry;
+        if (old != null &&
+            parsed == originalInputAmount &&
+            currency == originalInputCurrency &&
+            accountId == old.accountId &&
+            type == old.type) {
+          return Text(
+            'Saved reporting amount: ${old.currency.display(old.amount)}\nChanging the amount uses the current account rate.',
+          );
+        }
+
+        final base = currency == widget.store.currency
+            ? parsed
+            : account.toBase(parsed);
+        final native = currency == account.currency
+            ? parsed
+            : account.fromBase(parsed);
+        return Text(
+          '${widget.store.currency.display(base)} = ${account.currency.display(native)}\n'
+          '1 ${widget.store.currency.code} = ${account.exchangeRate} ${account.currency.code}',
+        );
+      } on FormatException {
+        return const SizedBox.shrink();
+      }
+    },
+  );
+
   Widget accountField(bool destination) => AccountPicker(
     balances: widget.store.currentBalances.byAccount,
     label: destination
@@ -123,10 +246,9 @@ class _TransactionFormState extends State<TransactionForm> {
     accounts: widget.store.accounts
         .where(
           (account) =>
-              account.currency == currency &&
               (destination ||
-                  (type != EntryType.expense && type != EntryType.transfer) ||
-                  account.available),
+              (type != EntryType.expense && type != EntryType.transfer) ||
+              account.available),
         )
         .toList(),
     selectedId: destination ? destinationId : accountId,
@@ -138,8 +260,13 @@ class _TransactionFormState extends State<TransactionForm> {
     onChanged: (id) => setState(() {
       if (destination) {
         destinationId = id;
+        received.clear();
       } else {
+        changeInputCurrency(widget.store.currency);
         accountId = id;
+        if (type == EntryType.transfer && selectedAccount != null) {
+          changeInputCurrency(selectedAccount!.currency);
+        }
       }
     }),
     validator: (id) =>
@@ -184,6 +311,12 @@ class _TransactionFormState extends State<TransactionForm> {
         types: EntryType.values,
         onChanged: (value) => setState(() {
           type = value.type;
+          if (type == EntryType.transfer && selectedAccount != null) {
+            changeInputCurrency(selectedAccount!.currency);
+          } else {
+            destinationId = null;
+            changeInputCurrency(widget.store.currency);
+          }
           category = value.name;
         }),
       ),
@@ -217,7 +350,52 @@ class _TransactionFormState extends State<TransactionForm> {
         ),
         const SizedBox(height: 12),
         accountField(false),
-        if (type == EntryType.transfer) accountField(true),
+        if (type != EntryType.transfer &&
+            selectedAccount != null &&
+            selectedAccount!.currency != widget.store.currency) ...[
+          DropdownButtonFormField<Currency>(
+            key: ValueKey(('transaction-input-currency', currency, accountId)),
+            initialValue: currency,
+            decoration: const InputDecoration(labelText: 'Enter amount in'),
+            items: [widget.store.currency, selectedAccount!.currency]
+                .map((c) => DropdownMenuItem(value: c, child: Text(c.code)))
+                .toList(),
+            onChanged: saving
+                ? null
+                : (value) => setState(() => changeInputCurrency(value!)),
+          ),
+          const SizedBox(height: 8),
+          conversionPreview(),
+        ],
+        if (type == EntryType.transfer) ...[
+          Text(
+            'Amount deducted (${selectedAccount?.currency.code ?? currency.code}) is entered above.',
+          ),
+          accountField(true),
+          if (crossCurrencyTransfer)
+            TextFormField(
+              controller: received,
+              enabled: !saving,
+              decoration: InputDecoration(
+                labelText:
+                    'Amount received (${destinationAccount!.currency.code})',
+              ),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              validator: (value) {
+                try {
+                  if (destinationAccount!.currency.parseInput(value ?? '') >
+                      0) {
+                    return null;
+                  }
+                } on FormatException catch (e) {
+                  return e.message;
+                }
+                return 'Enter the amount received.';
+              },
+            ),
+        ],
         const SizedBox(height: 12),
         Card(
           child: ListTile(

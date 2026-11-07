@@ -19,7 +19,7 @@ class LedgerDatabase {
     final db = await (factory ?? databaseFactorySqflitePlugin).openDatabase(
       location,
       options: OpenDatabaseOptions(
-        version: 13,
+        version: 14,
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) {
             await db.execute(
@@ -59,6 +59,7 @@ class LedgerDatabase {
           if (oldVersion < 13) {
             await _addCategoryColors(db);
           }
+          if (oldVersion < 14) await _addForeignCurrencyAccounts(db);
         },
         // Table rebuild in v12 preserves dependent receipt/history links.
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = OFF'),
@@ -94,10 +95,37 @@ class LedgerDatabase {
           await _addRecurringClassification(db);
           await _upgradeCurrencyAndDebts(db);
           await _addCategoryColors(db);
+          await _addForeignCurrencyAccounts(db);
         },
       ),
     );
     return db;
+  }
+
+  static Future<void> _addForeignCurrencyAccounts(DatabaseExecutor db) async {
+    Future<void> add(String table, String name, String definition) async {
+      final columns = await db.rawQuery('PRAGMA table_info($table)');
+      if (!columns.any((row) => row['name'] == name)) {
+        await db.execute('ALTER TABLE $table ADD COLUMN $name $definition');
+      }
+    }
+
+    await add('accounts', 'base_currency', 'TEXT');
+    await add('accounts', 'exchange_rate', "TEXT NOT NULL DEFAULT '1'");
+    await db.execute(
+      'UPDATE accounts SET base_currency = currency WHERE base_currency IS NULL',
+    );
+    for (final column in ['account_amount', 'destination_amount']) {
+      await add(
+        'transactions',
+        column,
+        'INTEGER CHECK($column IS NULL OR ($column > 0 AND $column <= 9000000000000000))',
+      );
+    }
+    await add('transactions', 'fx_snapshot', 'TEXT');
+    for (final table in ['recurring_rules', 'recurring_occurrences']) {
+      await add(table, 'currency', 'TEXT');
+    }
   }
 
   static Future<void> _addCategoryColors(DatabaseExecutor db) => db.execute(

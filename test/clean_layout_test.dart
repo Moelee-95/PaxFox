@@ -109,7 +109,11 @@ void main() {
         find.textContaining('Long invoices may need more time.'),
         findsNothing,
       );
-      await tester.tap(find.byIcon(Icons.info_outline));
+      await tester.tap(
+        find.byWidgetPredicate(
+          (w) => w is Icon && w.semanticLabel == 'Invoice scanning settings',
+        ),
+      );
       await tester.pumpAndSettle();
       expect(
         find.textContaining('Long invoices may need more time.'),

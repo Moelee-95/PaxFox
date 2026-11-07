@@ -250,7 +250,7 @@ void main() {
       factory: databaseFactoryFfi,
     );
     try {
-      expect(await migrated.db.getVersion(), 13);
+      expect(await migrated.db.getVersion(), 14);
       expect(migrated.currency, Currency.eur);
       expect(migrated.entries.single.id, entry.id);
       expect(migrated.entries.single.createdAt, entry.createdAt);

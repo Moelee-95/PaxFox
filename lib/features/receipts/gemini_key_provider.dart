@@ -6,8 +6,7 @@ import 'package:http/http.dart' as http;
 import '../../core/domain/app_failure.dart';
 
 class GeminiKeyProvider {
-  static const String configUrl =
-      'https://alhayali.de/card_lens/gemini-config.json';
+  static const String configUrl = 'https://api.moelee.de/api/v1/gemini-config';
 
   // This protects the key from plain-text discovery only. Because the app must
   // decrypt the remote value, this encryption key is intentionally bundled
@@ -17,12 +16,15 @@ class GeminiKeyProvider {
 
   static final AesGcm _cipher = AesGcm.with256bits();
 
-  static Future<String> fetchKey({http.Client? client}) async {
+  static Future<String> fetchKey({
+    http.Client? client,
+    String sourceUrl = configUrl,
+  }) async {
     final ownsClient = client == null;
     final requestClient = client ?? http.Client();
 
     try {
-      final baseUri = Uri.parse(configUrl);
+      final baseUri = Uri.parse(sourceUrl);
       final requestUri = baseUri.replace(
         queryParameters: {
           ...baseUri.queryParameters,

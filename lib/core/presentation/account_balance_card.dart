@@ -62,6 +62,14 @@ class AccountBalanceCard extends StatelessWidget {
               ),
             ),
           ),
+          if (account.currency != account.reportingCurrency)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                '${account.reportingCurrency.display(account.toBase(balance))} ? 1 ${account.reportingCurrency.code} = ${account.exchangeRate} ${account.currency.code}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
         ],
       ),
     ),

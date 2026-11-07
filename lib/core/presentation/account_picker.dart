@@ -109,9 +109,15 @@ class _AccountPickerState extends State<AccountPicker> {
                             fit: BoxFit.scaleDown,
                             alignment: Alignment.centerLeft,
                             child: Text(
-                              account.currency.formatGrouped(
-                                widget.balances[account.id] ?? account.opening,
-                              ),
+                              account.currency == account.reportingCurrency
+                                  ? account.currency.formatGrouped(
+                                      widget.balances[account.id] ??
+                                          account.opening,
+                                    )
+                                  : account.currency.display(
+                                      widget.balances[account.id] ??
+                                          account.opening,
+                                    ),
                               style: theme.textTheme.bodySmall,
                             ),
                           ),

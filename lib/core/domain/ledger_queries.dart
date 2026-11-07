@@ -141,25 +141,21 @@ class AccountBalances {
     };
     final end = dateOnly(through);
 
-    void apply(int? id, LedgerEntry entry, int change) {
-      final account = byId[id];
-      if (id == null || account == null || entry.currency != account.currency) {
-        return;
-      }
-      final start = starts[id]!;
-      if (account.includeOnAsOf
-          ? entry.date.isBefore(start)
-          : !entry.date.isAfter(start)) {
-        return;
-      }
-      balances[id] = balances[id]! + change;
-    }
-
     for (final entry in entries) {
       if (entry.date.isAfter(end)) continue;
-      apply(entry.accountId, entry, entry.accountChange);
-      if (entry.type == EntryType.transfer) {
-        apply(entry.destinationId, entry, entry.amount);
+      for (final id in {
+        entry.accountId,
+        entry.destinationId,
+      }.whereType<int>()) {
+        final account = byId[id];
+        if (account == null) continue;
+        final start = starts[id]!;
+        if (account.includeOnAsOf
+            ? entry.date.isBefore(start)
+            : !entry.date.isAfter(start)) {
+          continue;
+        }
+        balances[id] = balances[id]! + entry.changeFor(account);
       }
     }
 
@@ -168,8 +164,8 @@ class AccountBalances {
     var totalAvailable = 0;
     for (final account in accounts) {
       final balance = balances[account.id] ?? account.opening;
-      totalWealth += balance;
-      if (account.available) totalAvailable += balance;
+      totalWealth += account.toBase(balance);
+      if (account.available) totalAvailable += account.toBase(balance);
     }
     wealth = totalWealth;
     available = totalAvailable;

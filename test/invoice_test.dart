@@ -133,10 +133,11 @@ void main() {
     });
     final service = GeminiInvoiceExtractor(
       client: client,
-      keyLoader: () async => 'test-only-key',
+      manualKey: 'test-only-key',
+      configUrl: 'https://unused.example.com/config.json',
     );
     final draft = await service.extract([file, file], {'Groceries'});
-    expect(calls, 1);
+    expect(calls, 1); // Manual mode sends only the Gemini POST, no config GET.
     expect(draft.total, 450);
     final failure = GeminiInvoiceExtractor(
       client: MockClient(

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -70,6 +71,101 @@ void main() {
     expect(decoded.width, 700);
     expect(decoded.height, 500);
     expect(decoded.exif.imageIfd.orientation, anyOf(isNull, equals(1)));
+  });
+
+  test('large scans respect the pixel budget as well as both edge limits', () {
+    // This aspect ratio rounds above four megapixels if both output dimensions
+    // are rounded independently. It also fits the old short/long-edge limits.
+    final decoded = img.decodeJpg(prepareInvoiceImage(receiptPng(2000, 3001)))!;
+    expect(
+      decoded.width * decoded.height,
+      lessThanOrEqualTo(maxInvoiceImagePixels),
+    );
+    expect(decoded.width, lessThanOrEqualTo(2000));
+    expect(decoded.height, lessThanOrEqualTo(6000));
+    expect(decoded.width / decoded.height, closeTo(2000 / 3001, 0.001));
+  });
+
+  test('cancelled preparation cannot overlap its retry or start a stale queued page', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'moneva_serial_preparation_',
+    );
+    final originalBytes = receiptPng(100, 200);
+    final processedBytes = prepareInvoiceImage(originalBytes);
+    final sources = <File>[];
+    for (final name in ['active', 'queued', 'retry']) {
+      sources.add(
+        await File('${directory.path}/$name.png').writeAsBytes(originalBytes),
+      );
+    }
+    final firstStarted = Completer<void>();
+    final firstResult = Completer<Uint8List>();
+    final workerSources = <String>[];
+    var activeWorkers = 0;
+    var maximumWorkers = 0;
+    final preparation = InvoiceImagePreparation(
+      temporaryDirectory: () async => directory,
+      imageProcessor: (source) async {
+        workerSources.add(source.path);
+        activeWorkers++;
+        if (activeWorkers > maximumWorkers) maximumWorkers = activeWorkers;
+        try {
+          if (source.path == sources.first.path) {
+            firstStarted.complete();
+            return await firstResult.future;
+          }
+          return processedBytes;
+        } finally {
+          activeWorkers--;
+        }
+      },
+    );
+    File? prepared;
+    try {
+      final firstFailure = expectLater(
+        preparation.prepare(sources[0]),
+        throwsStateError,
+      );
+      final queuedFailure = expectLater(
+        preparation.prepare(sources[1]),
+        throwsStateError,
+      );
+      await firstStarted.future;
+      preparation.cancelPending();
+      final retry = preparation.prepare(sources[2]);
+      // Give an incorrectly concurrent implementation a chance to start.
+      await Future<void>.delayed(Duration.zero);
+      expect(workerSources, [sources[0].path]);
+      firstResult.complete(processedBytes);
+      await Future.wait([firstFailure, queuedFailure]);
+      prepared = await retry;
+
+      expect(maximumWorkers, 1);
+      expect(workerSources, [sources[0].path, sources[2].path]);
+      expect(
+        await InvoiceImagePreparation.bytesFor(prepared),
+        same(processedBytes),
+      );
+      expect(
+        await InvoiceImagePreparation.bytesFor(prepared),
+        same(processedBytes),
+      );
+      expect(workerSources, hasLength(2));
+      final ownedFiles = await prepared.parent.list().toList();
+      expect(ownedFiles.map((file) => file.path), [prepared.path]);
+      for (final source in sources) {
+        expect(await source.readAsBytes(), originalBytes);
+      }
+    } finally {
+      if (!firstResult.isCompleted) firstResult.complete(processedBytes);
+      await preparation.dispose();
+      if (prepared != null) expect(await prepared.exists(), isFalse);
+      for (final source in sources) {
+        expect(await source.readAsBytes(), originalBytes);
+        await source.delete();
+      }
+      await directory.delete();
+    }
   });
 
   test(

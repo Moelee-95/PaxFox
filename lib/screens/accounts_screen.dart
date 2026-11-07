@@ -69,41 +69,51 @@ class AccountsScreen extends StatelessWidget {
                         ? Icons.payments_outlined
                         : Icons.account_balance_outlined,
                   ),
-                  subtitle: Wrap(
-                    spacing: 4,
-                    children: [
-                      _policyIcon(
-                        context,
-                        a.canOverdraw
-                            ? Icons.credit_score_outlined
-                            : Icons.shield_outlined,
-                        a.canOverdraw
-                            ? 'Overdraft allowed'
-                            : 'Cannot go below zero',
-                      ),
-                      if (!a.available)
-                        _policyIcon(
-                          context,
-                          Icons.lock_outline,
-                          'Blocked account: cannot fund spending or outgoing transfers',
-                        ),
-                      _policyIcon(
-                        context,
-                        Icons.account_balance_wallet_outlined,
-                        'Included in account wealth',
-                      ),
-                    ],
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '${a.currency.symbol}${a.currency.formatGrouped(store.currentBalances.byAccount[a.id] ?? a.opening)}',
+                        a.currency.display(
+                          store.currentBalances.byAccount[a.id] ?? a.opening,
+                        ),
                       ),
-                      const SizedBox(width: 8),
-                      const Icon(Icons.edit_outlined),
+                      if (a.currency != store.currency)
+                        Text(
+                          store.currency.display(
+                            a.toBase(
+                              store.currentBalances.byAccount[a.id] ??
+                                  a.opening,
+                            ),
+                          ),
+                        ),
+                      Wrap(
+                        spacing: 4,
+                        children: [
+                          _policyIcon(
+                            context,
+                            a.canOverdraw
+                                ? Icons.credit_score_outlined
+                                : Icons.shield_outlined,
+                            a.canOverdraw
+                                ? 'Overdraft allowed'
+                                : 'Cannot go below zero',
+                          ),
+                          if (!a.available)
+                            _policyIcon(
+                              context,
+                              Icons.lock_outline,
+                              'Blocked account: cannot fund spending or outgoing transfers',
+                            ),
+                          _policyIcon(
+                            context,
+                            Icons.account_balance_wallet_outlined,
+                            'Included in account wealth',
+                          ),
+                        ],
+                      ),
                     ],
                   ),
+                  trailing: const Icon(Icons.edit_outlined),
                 ),
               ),
             OutlinedButton.icon(
@@ -168,7 +178,11 @@ class AccountForm extends StatefulWidget {
 
 class _AccountFormState extends State<AccountForm> {
   final form = GlobalKey<FormState>();
-  late final TextEditingController name, balance;
+  late final TextEditingController name, balance, exchangeRate;
+  late Currency accountCurrency;
+  bool balanceEdited = false;
+  Account? conversionSource;
+  int? conversionAmount;
   late AccountKind kind;
   late DateTime asOf;
   late bool available, overdraft;
@@ -181,10 +195,12 @@ class _AccountFormState extends State<AccountForm> {
     super.initState();
     final a = widget.account;
     name = TextEditingController(text: a?.name ?? '');
+    accountCurrency = a?.currency ?? widget.store.currency;
+    exchangeRate = TextEditingController(text: a?.exchangeRate ?? '1');
     balance = TextEditingController(
       text: a == null
           ? '0'
-          : widget.store.currency.formatGrouped(
+          : accountCurrency.formatGrouped(
               widget.store.currentBalances.byAccount[a.id] ?? a.opening,
             ),
     );
@@ -198,15 +214,14 @@ class _AccountFormState extends State<AccountForm> {
   void dispose() {
     name.dispose();
     balance.dispose();
+    exchangeRate.dispose();
     action.dispose();
     super.dispose();
   }
 
   int amount() {
     final input = balance.text.trim();
-    return widget.store.currency.parseInput(
-          input.replaceFirst(RegExp(r'^-'), ''),
-        ) *
+    return accountCurrency.parseInput(input.replaceFirst(RegExp(r'^-'), '')) *
         (input.startsWith('-') ? -1 : 1);
   }
 
@@ -217,18 +232,15 @@ class _AccountFormState extends State<AccountForm> {
     final saved = await action.run(() async {
       final old = widget.account;
       final desired = amount();
-      // Balance correction adjusts the opening baseline without deleting or
-      // duplicating payments, and retains legacy snapshot date semantics.
-      final opening = old == null
-          ? desired
-          : old.opening +
-                desired -
-                (widget.store.currentBalances.byAccount[old.id] ?? old.opening);
       final account = Account(
         id: old?.id,
         name: name.text.trim(),
-        currency: widget.store.currency,
-        opening: opening,
+        currency: accountCurrency,
+        baseCurrency: widget.store.currency,
+        exchangeRate: accountCurrency == widget.store.currency
+            ? '1'
+            : ExchangeRate.parse(exchangeRate.text).value,
+        opening: old?.opening ?? desired,
         asOf: asOf,
         kind: kind,
         available: available,
@@ -238,10 +250,76 @@ class _AccountFormState extends State<AccountForm> {
       if (old == null) {
         await widget.store.addAccount(account);
       } else {
-        await widget.store.updateAccount(account);
+        await widget.store.updateAccount(account, currentBalance: desired);
       }
     }, failureMessage: 'Could not save account. Please retry.');
     if (saved && mounted) Navigator.pop(context);
+  }
+
+  void changeAccountCurrency(Currency next) {
+    try {
+      conversionAmount = amount();
+      conversionSource = Account(
+        name: '',
+        currency: accountCurrency,
+        baseCurrency: widget.store.currency,
+        exchangeRate: accountCurrency == widget.store.currency
+            ? '1'
+            : ExchangeRate.parse(exchangeRate.text).value,
+        opening: 0,
+        asOf: asOf,
+      );
+    } on FormatException {
+      conversionSource = null;
+      conversionAmount = null;
+    }
+    accountCurrency = next;
+    balanceEdited = false;
+    exchangeRate.text = next == widget.store.currency
+        ? '1'
+        : next == widget.account?.currency
+        ? widget.account!.exchangeRate
+        : '';
+    updateConvertedBalance();
+  }
+
+  void updateConvertedBalance() {
+    final old = conversionSource;
+    if (old == null ||
+        conversionAmount == null ||
+        old.currency == accountCurrency ||
+        balanceEdited) {
+      return;
+    }
+    try {
+      final target = Account(
+        name: '',
+        currency: accountCurrency,
+        baseCurrency: widget.store.currency,
+        exchangeRate: accountCurrency == widget.store.currency
+            ? '1'
+            : ExchangeRate.parse(exchangeRate.text).value,
+        opening: 0,
+        asOf: asOf,
+      );
+      final native = conversionAmount!;
+      balance.text = accountCurrency.formatGrouped(
+        old.convertTo(target, native),
+      );
+    } on FormatException {
+      /* Complete the rate before converting. */
+    }
+  }
+
+  String? get basePreview {
+    if (accountCurrency == widget.store.currency) return null;
+    try {
+      final converted = ExchangeRate.parse(exchangeRate.text)
+          .toBase(amount(), accountCurrency.scale, widget.store.currency.scale);
+      return 'Equivalent: ${widget.store.currency.display(converted)}';
+    } on FormatException {
+      return null;
+    }
   }
 
   Future<void> delete() async {
@@ -290,7 +368,52 @@ class _AccountFormState extends State<AccountForm> {
               validator: (s) =>
                   s == null || s.trim().isEmpty ? 'Enter a name.' : null,
             ),
-            Text('Currency: ${widget.store.currency.code}'),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<Currency>(
+              key: ValueKey(('account-currency', accountCurrency)),
+              initialValue: accountCurrency,
+              decoration: const InputDecoration(labelText: 'Account currency'),
+              items: Currency.values
+                  .where(
+                    (c) =>
+                        kind == AccountKind.bank || c == widget.store.currency,
+                  )
+                  .map((c) => DropdownMenuItem(value: c, child: Text(c.code)))
+                  .toList(),
+              onChanged: busy
+                  ? null
+                  : (value) => setState(() {
+                      changeAccountCurrency(value!);
+                    }),
+            ),
+            if (accountCurrency != widget.store.currency) ...[
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: exchangeRate,
+                enabled: !busy,
+                inputFormatters: const [GroupedAmountFormatter()],
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: InputDecoration(
+                  labelText:
+                      '1 ${widget.store.currency.code} equals (${accountCurrency.code})',
+                ),
+                onChanged: (_) => setState(updateConvertedBalance),
+                validator: (value) {
+                  try {
+                    ExchangeRate.parse(value ?? '');
+                  } on FormatException catch (e) {
+                    return e.message;
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'The latest rate values this account. Saved income and expenses keep their original ${widget.store.currency.code} values.',
+              ),
+            ],
             const SizedBox(height: 16),
             DropdownButtonFormField<AccountKind>(
               initialValue: kind,
@@ -306,6 +429,9 @@ class _AccountFormState extends State<AccountForm> {
                       if (kind == AccountKind.cash) {
                         overdraft = false;
                         available = true;
+                        if (accountCurrency != widget.store.currency) {
+                          changeAccountCurrency(widget.store.currency);
+                        }
                       }
                     }),
             ),
@@ -319,12 +445,13 @@ class _AccountFormState extends State<AccountForm> {
             const SizedBox(height: 16),
             TextFormField(
               controller: balance,
+              onChanged: (_) => setState(() => balanceEdited = true),
               inputFormatters: const [GroupedAmountFormatter()],
               enabled: !busy,
               decoration: InputDecoration(
                 labelText: editing
-                    ? 'Current balance (${widget.store.currency.symbol.trim()})'
-                    : 'Starting balance (${widget.store.currency.symbol.trim()})',
+                    ? 'Current balance (${accountCurrency.symbol.trim()})'
+                    : 'Starting balance (${accountCurrency.symbol.trim()})',
               ),
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
@@ -342,6 +469,11 @@ class _AccountFormState extends State<AccountForm> {
                 return null;
               },
             ),
+            if (basePreview != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(basePreview!),
+              ),
             ListTile(
               contentPadding: EdgeInsets.zero,
               title: Text('Starting date: ${dayKey(asOf)}'),

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../features/receipts/invoice.dart';
+import '../../features/receipts/gemini_key_provider.dart';
 import '../../features/receipts/invoice_images.dart';
 import '../domain/category.dart';
 import '../domain/ledger.dart';
@@ -82,6 +83,51 @@ class LedgerStore extends ChangeNotifier {
   int get totalDebt => debts.fold(0, (sum, debt) => sum + debt.amount);
   int get netWealth => currentBalances.wealth - totalDebt;
   int invoiceTimeoutSeconds = 180;
+  String geminiConfigUrl = GeminiKeyProvider.configUrl;
+  bool geminiUseManualKey = false;
+  String geminiManualKey = '';
+
+  static bool validGeminiConfigUrl(String value) {
+    final uri = Uri.tryParse(value.trim());
+    return uri != null &&
+        uri.scheme == 'https' &&
+        uri.host.isNotEmpty &&
+        uri.userInfo.isEmpty &&
+        !uri.hasFragment &&
+        !RegExp(r'\s').hasMatch(value.trim());
+  }
+
+  static bool validGeminiKey(String value) =>
+      value.trim().length >= 20 && !RegExp(r'\s').hasMatch(value.trim());
+
+  Future<void> saveInvoiceSettings({
+    required int seconds,
+    required String configUrl,
+    required bool useManualKey,
+    required String manualKey,
+  }) async {
+    if (seconds < 30 ||
+        seconds > 900 ||
+        !validGeminiConfigUrl(configUrl) ||
+        (useManualKey && !validGeminiKey(manualKey))) {
+      throw ArgumentError('Enter valid invoice scanning settings.');
+    }
+    await db.transaction((txn) async {
+      for (final setting in {
+        'invoice_timeout_seconds': '$seconds',
+        'gemini_config_url': configUrl.trim(),
+        'gemini_use_manual_key': '$useManualKey',
+        'gemini_manual_key': manualKey.trim(),
+      }.entries) {
+        await txn.insert('settings', {
+          'key': setting.key,
+          'value': setting.value,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
+    await _refreshAfterWrite();
+  }
+
   String _profileName = '';
   String get profileName => _profileName;
   String _profileEmail = '';
@@ -239,7 +285,7 @@ class LedgerStore extends ChangeNotifier {
           (await txn.query(
             'accounts',
             columns: ['id'],
-            where: 'currency != ?',
+            where: 'COALESCE(base_currency, currency) != ?',
             whereArgs: [activeCurrency.name],
             limit: 1,
           )).isNotEmpty;
@@ -251,7 +297,7 @@ class LedgerStore extends ChangeNotifier {
       );
       final accountList = (await txn.query(
         'accounts',
-        where: 'currency = ?',
+        where: 'COALESCE(base_currency, currency) = ?',
         whereArgs: [activeCurrency.name],
         orderBy: 'name',
       )).map(Account.fromMap).toList();
@@ -262,6 +308,10 @@ class LedgerStore extends ChangeNotifier {
         'AND NOT EXISTS (SELECT 1 FROM recurring_occurrences o WHERE o.account_id = a.id)',
       )).map((row) => row['id'] as int).toSet();
       return (
+        geminiConfigUrl:
+            settingsByKey['gemini_config_url'] ?? GeminiKeyProvider.configUrl,
+        geminiUseManualKey: settingsByKey['gemini_use_manual_key'] == 'true',
+        geminiManualKey: settingsByKey['gemini_manual_key'] ?? '',
         profileName: settingsByKey['profile_name'] ?? '',
         profileEmail: settingsByKey['profile_email'] ?? '',
         deletableBankIds: deletableBankIds,
@@ -296,6 +346,9 @@ class LedgerStore extends ChangeNotifier {
     _profileEmail = snapshot.profileEmail;
     _debts = List.unmodifiable(snapshot.debts);
     invoiceTimeoutSeconds = snapshot.timeout;
+    geminiConfigUrl = snapshot.geminiConfigUrl;
+    geminiUseManualKey = snapshot.geminiUseManualKey;
+    geminiManualKey = snapshot.geminiManualKey;
     _receiptTransactionIds = Set.unmodifiable(snapshot.receiptIds);
     _scannedInvoiceTransactionIds = Set.unmodifiable(snapshot.scannedIds);
     _recurringRules = List.unmodifiable(snapshot.rules);
@@ -318,6 +371,127 @@ class LedgerStore extends ChangeNotifier {
     _balanceDate = today;
     _snapshotNeedsRefresh = false;
     notifyListeners();
+  }
+
+  /// Builds reporting and native amounts together. Reporting values are frozen
+  /// on save; account rates subsequently revalue only current account totals.
+  LedgerEntry entryFromInput({
+    int? id,
+    required EntryType type,
+    required int inputAmount,
+    required Currency inputCurrency,
+    required DateTime date,
+    required String description,
+    required String category,
+    int? accountId,
+    int? destinationId,
+    int? receivedAmount,
+    String notes = '',
+  }) {
+    final source = accounts.where((a) => a.id == accountId).firstOrNull;
+    final target = accounts.where((a) => a.id == destinationId).firstOrNull;
+    return _fromInput(
+      id: id,
+      type: type,
+      inputAmount: inputAmount,
+      inputCurrency: inputCurrency,
+      date: date,
+      description: description,
+      category: category,
+      source: source,
+      target: target,
+      accountId: accountId,
+      destinationId: destinationId,
+      receivedAmount: receivedAmount,
+      notes: notes,
+    );
+  }
+
+  LedgerEntry _fromInput({
+    int? id,
+    required EntryType type,
+    required int inputAmount,
+    required Currency inputCurrency,
+    required DateTime date,
+    required String description,
+    required String category,
+    Account? source,
+    Account? target,
+    int? accountId,
+    int? destinationId,
+    int? receivedAmount,
+    String notes = '',
+  }) {
+    if (inputAmount <= 0) {
+      throw ArgumentError('Enter an amount greater than zero.');
+    }
+    if (inputCurrency != currency && inputCurrency != source?.currency) {
+      throw ArgumentError(
+        'Use the app currency or the selected account currency.',
+      );
+    }
+    final native = source == null
+        ? inputAmount
+        : inputCurrency == source.currency
+        ? inputAmount
+        : source.fromBase(inputAmount);
+    final base = inputCurrency == currency
+        ? inputAmount
+        : source!.toBase(inputAmount);
+    if (base <= 0 || native <= 0) {
+      throw ArgumentError(
+        'Amount is below the smallest supported currency unit.',
+      );
+    }
+    int? received;
+    if (type == EntryType.transfer) {
+      if (source == null || target == null || source.id == target.id) {
+        throw ArgumentError('Choose two different accounts for a transfer.');
+      }
+      if (source.currency != target.currency && receivedAmount == null) {
+        throw ArgumentError(
+          'Enter the amount received in the destination currency.',
+        );
+      }
+      received = receivedAmount ?? native;
+      if (received <= 0 ||
+          received > 9000000000000000 ||
+          (source.currency == target.currency && received != native)) {
+        throw ArgumentError(
+          'Check the amount received by the destination account.',
+        );
+      }
+    }
+    final snapshot =
+        source != null &&
+            (source.currency != currency ||
+                (target != null && target.currency != currency))
+        ? FxSnapshot(
+            inputCurrency: inputCurrency,
+            inputAmount: inputAmount,
+            sourceCurrency: source.currency,
+            sourceAmount: native,
+            sourceRate: source.exchangeRate,
+            targetCurrency: target?.currency,
+            targetAmount: received,
+            targetRate: target?.exchangeRate,
+          )
+        : null;
+    return LedgerEntry(
+      id: id,
+      type: type,
+      amount: base,
+      currency: currency,
+      date: date,
+      description: description,
+      category: category,
+      notes: notes,
+      accountId: accountId,
+      destinationId: destinationId,
+      accountAmount: source == null ? null : native,
+      destinationAmount: received,
+      fx: snapshot,
+    );
   }
 
   Future<void> saveEntry(LedgerEntry entry) async {
@@ -361,7 +535,20 @@ class LedgerStore extends ChangeNotifier {
     var imported = 0;
     var skipped = 0;
     await db.transaction((txn) async {
-      String signature(LedgerEntry e) => jsonEncode(e.toMap());
+      String signature(LedgerEntry e) {
+        final source = accounts.where((a) => a.id == e.accountId).firstOrNull;
+        final target = accounts
+            .where((a) => a.id == e.destinationId)
+            .firstOrNull;
+        return jsonEncode({
+          ...e.toMap(),
+          'account_amount': e.accountAmount ?? source?.fromBase(e.amount),
+          'destination_amount': e.type != EntryType.transfer
+              ? null
+              : e.destinationAmount ?? target?.fromBase(e.amount),
+        });
+      }
+
       final existing = <String, int>{};
       if (skipExisting) {
         for (final record in await txn.query('transactions')) {
@@ -423,6 +610,9 @@ class LedgerStore extends ChangeNotifier {
             accountId: source.accountId,
             destinationId: source.destinationId,
             notes: source.notes,
+            accountAmount: source.accountAmount,
+            destinationAmount: source.destinationAmount,
+            fx: source.fx,
           );
           final key = signature(entry);
           if ((existing[key] ?? 0) > 0) {
@@ -463,10 +653,11 @@ class LedgerStore extends ChangeNotifier {
 
   Future<int> _writeEntry(
     DatabaseExecutor txn,
-    LedgerEntry entry, {
+    LedgerEntry input, {
     bool allowUnassigned = false,
     bool checkFunds = true,
   }) async {
+    var entry = input;
     if (entry.id != null) {
       final rows = await txn.query(
         'receipts',
@@ -521,9 +712,10 @@ class LedgerStore extends ChangeNotifier {
         where: 'id = ?',
         whereArgs: [id],
       );
-      if (rows.isEmpty || rows.single['currency'] != entry.currency.name) {
+      if (rows.isEmpty ||
+          Account.fromMap(rows.single).reportingCurrency != currency) {
         throw ArgumentError(
-          'Account must exist and match transaction currency.',
+          'Account must exist and use the app reporting currency.',
         );
       }
     }
@@ -548,6 +740,103 @@ class LedgerStore extends ChangeNotifier {
     }
     if (entry.type != EntryType.transfer && entry.destinationId != null) {
       throw ArgumentError('Only transfers have a destination account.');
+    }
+    final oldEntry = previous.isEmpty
+        ? null
+        : LedgerEntry.fromMap(previous.single);
+    final sameMoney =
+        oldEntry != null &&
+        oldEntry.amount == entry.amount &&
+        oldEntry.currency == entry.currency &&
+        oldEntry.type == entry.type &&
+        oldEntry.accountId == entry.accountId &&
+        oldEntry.destinationId == entry.destinationId;
+    if (entry.fx == null && entry.accountAmount == null && sameMoney) {
+      entry = entry.withAmounts(
+        accountAmount: oldEntry.accountAmount,
+        destinationAmount: oldEntry.destinationAmount,
+        fx: oldEntry.fx,
+      );
+    }
+    final staleAmounts =
+        oldEntry != null &&
+        oldEntry.amount != entry.amount &&
+        oldEntry.accountAmount == entry.accountAmount &&
+        jsonEncode(oldEntry.fx?.toMap()) == jsonEncode(entry.fx?.toMap());
+    if (staleAmounts ||
+        entry.accountAmount == null ||
+        (oldEntry != null &&
+            (oldEntry.accountId != entry.accountId ||
+                oldEntry.destinationId != entry.destinationId))) {
+      final sourceRows = entry.accountId == null
+          ? <Map<String, Object?>>[]
+          : await txn.query(
+              'accounts',
+              where: 'id = ?',
+              whereArgs: [entry.accountId],
+            );
+      final targetRows = entry.destinationId == null
+          ? <Map<String, Object?>>[]
+          : await txn.query(
+              'accounts',
+              where: 'id = ?',
+              whereArgs: [entry.destinationId],
+            );
+      entry = _fromInput(
+        id: entry.id,
+        type: entry.type,
+        inputAmount: entry.amount,
+        inputCurrency: currency,
+        date: entry.date,
+        description: entry.description,
+        category: entry.category,
+        notes: entry.notes,
+        accountId: entry.accountId,
+        destinationId: entry.destinationId,
+        source: sourceRows.isEmpty ? null : Account.fromMap(sourceRows.single),
+        target: targetRows.isEmpty ? null : Account.fromMap(targetRows.single),
+        receivedAmount: entry.destinationAmount,
+      );
+    }
+    for (final native in [
+      entry.accountAmount,
+      entry.destinationAmount,
+    ].whereType<int>()) {
+      if (native <= 0 || native > 9000000000000000) {
+        throw ArgumentError('Invalid account amount.');
+      }
+    }
+    final fx = entry.fx;
+    if (fx != null) {
+      for (final value in [
+        fx.inputAmount,
+        fx.sourceAmount,
+        fx.targetAmount,
+      ].whereType<int>()) {
+        if (value <= 0 || value > 9000000000000000) {
+          throw ArgumentError('Invalid original currency amount.');
+        }
+      }
+      final rate = ExchangeRate.parse(fx.sourceRate);
+      if (fx.targetRate != null) ExchangeRate.parse(fx.targetRate!);
+      if (fx.inputCurrency != entry.currency &&
+          fx.inputCurrency != fx.sourceCurrency) {
+        throw ArgumentError('Invalid original input currency.');
+      }
+      final expected = fx.inputCurrency == entry.currency
+          ? fx.inputAmount
+          : rate.toBase(
+              fx.inputAmount,
+              fx.inputCurrency.scale,
+              entry.currency.scale,
+            );
+      if (expected != entry.amount ||
+          (entry.type == EntryType.transfer &&
+              (fx.targetCurrency == null || fx.targetAmount == null)) ||
+          (entry.type != EntryType.transfer &&
+              (fx.targetCurrency != null || fx.targetAmount != null))) {
+        throw ArgumentError('Currency details do not match this transaction.');
+      }
     }
     final now = DateTime.now().toUtc().toIso8601String();
     final values = {...entry.toMap(), 'updated_at': now};
@@ -621,7 +910,12 @@ class LedgerStore extends ChangeNotifier {
           ...old.toMap(),
           'id': id,
           'category': ?category,
-          if (changeAccount) 'account_id': accountId,
+          if (changeAccount) ...{
+            'account_id': accountId,
+            'account_amount': null,
+            'destination_amount': null,
+            'fx_snapshot': null,
+          },
         });
         affected.addAll([old.accountId, updated.accountId].whereType<int>());
         await _writeEntry(
@@ -711,6 +1005,7 @@ class LedgerStore extends ChangeNotifier {
 
   Future<void> addAccount(Account account) async {
     _validateAccount(account);
+    account.toBase(account.opening);
     await db.insert('accounts', account.toMap());
     await _refreshAfterWrite();
   }
@@ -762,30 +1057,149 @@ class LedgerStore extends ChangeNotifier {
     await _refreshAfterWrite();
   }
 
-  void _validateAccount(Account account, {Currency? selectedCurrency}) {
-    if (account.currency != (selectedCurrency ?? currency)) {
-      throw ArgumentError('Use the app currency.');
+  void _validateAccount(
+    Account account, {
+    Currency? selectedCurrency,
+    bool checkOpening = true,
+  }) {
+    final base = selectedCurrency ?? currency;
+    if (account.reportingCurrency != base ||
+        (account.kind == AccountKind.cash && account.currency != base)) {
+      throw ArgumentError(
+        'Cash must use the app currency; foreign banks need a reporting currency.',
+      );
     }
+    account.rate;
     if (account.name.trim().isEmpty ||
         account.opening.abs() > 9000000000000000) {
       throw ArgumentError('Invalid account.');
     }
-    if (!account.canOverdraw && account.opening < 0) {
+    if (checkOpening && !account.canOverdraw && account.opening < 0) {
       throw ArgumentError(
         'Cash and banks without overdraft cannot have a negative balance.',
       );
     }
   }
 
-  Future<void> updateAccount(Account account) async {
-    _validateAccount(account);
+  Future<void> updateAccount(Account account, {int? currentBalance}) async {
+    _validateAccount(account, checkOpening: false);
     if (account.id == null) {
       throw ArgumentError('Account no longer exists.');
     }
     await db.transaction((txn) async {
+      final oldRows = await txn.query(
+        'accounts',
+        where: 'id = ?',
+        whereArgs: [account.id],
+      );
+      if (oldRows.isEmpty) throw ArgumentError('Account no longer exists.');
+      final old = Account.fromMap(oldRows.single);
+      final linked = (await txn.query(
+        'transactions',
+        where: 'account_id = ? OR destination_id = ?',
+        whereArgs: [account.id, account.id],
+      )).map(LedgerEntry.fromMap).toList();
+      var opening = account.opening;
+      if (old.currency != account.currency) {
+        opening = old.convertTo(account, old.opening);
+        for (final entry in linked) {
+          final values = <String, Object?>{};
+          if (entry.accountId == account.id &&
+              (entry.accountAmount != null || entry.currency == old.currency)) {
+            values['account_amount'] = old.convertTo(
+              account,
+              entry.accountAmount ?? entry.amount,
+            );
+          }
+          if (entry.destinationId == account.id &&
+              (entry.destinationAmount != null ||
+                  entry.currency == old.currency)) {
+            values['destination_amount'] = old.convertTo(
+              account,
+              entry.destinationAmount ?? entry.amount,
+            );
+          }
+          if (values.values.any((value) => value == 0)) {
+            throw ArgumentError(
+              'Currency change would round an existing payment to zero.',
+            );
+          }
+          await txn.update(
+            'transactions',
+            values,
+            where: 'id = ?',
+            whereArgs: [entry.id],
+          );
+        }
+        for (final table in ['recurring_rules', 'recurring_occurrences']) {
+          for (final row in await txn.query(
+            table,
+            where: table == 'recurring_rules' && old.currency == currency
+                ? 'account_id = ? AND (currency = ? OR currency IS NULL)'
+                : 'account_id = ? AND currency = ?',
+            whereArgs: [account.id, old.currency.name],
+          )) {
+            // Posted history describes its original input and must not change.
+            if (table == 'recurring_occurrences' && row['status'] != 'failed') {
+              continue;
+            }
+            final converted = old.convertTo(account, row['amount'] as int);
+            if (converted <= 0) {
+              throw ArgumentError(
+                'Currency change would round a recurring payment to zero.',
+              );
+            }
+            await txn.update(
+              table,
+              {'amount': converted, 'currency': account.currency.name},
+              where: 'id = ?',
+              whereArgs: [row['id']],
+            );
+          }
+        }
+      }
+      final desiredBalance =
+          currentBalance ??
+          (old.currency == account.currency
+              ? null
+              : old.convertTo(
+                  account,
+                  accountBalance(old, linked, DateTime.now()),
+                ));
+      if (desiredBalance != null) {
+        final revised = (await txn.query(
+          'transactions',
+          where: 'account_id = ? OR destination_id = ?',
+          whereArgs: [account.id, account.id],
+        )).map(LedgerEntry.fromMap);
+        final baseline = Account(
+          id: account.id,
+          name: account.name,
+          currency: account.currency,
+          baseCurrency: account.reportingCurrency,
+          exchangeRate: account.exchangeRate,
+          opening: opening,
+          asOf: old.asOf,
+          includeOnAsOf: old.includeOnAsOf,
+          kind: account.kind,
+          available: account.available,
+          allowOverdraft: account.allowOverdraft,
+        );
+        opening +=
+            desiredBalance - accountBalance(baseline, revised, DateTime.now());
+      }
+      if (opening.abs() > 9000000000000000) {
+        throw ArgumentError('Account balance exceeds the supported limit.');
+      }
+
       final count = await txn.update(
         'accounts',
-        account.toMap(),
+        {
+          ...account.toMap(),
+          'opening': opening,
+          'as_of': dayKey(old.asOf),
+          'include_on_as_of': old.includeOnAsOf ? 1 : 0,
+        },
         where: 'id = ?',
         whereArgs: [account.id],
       );
@@ -807,7 +1221,8 @@ class LedgerStore extends ChangeNotifier {
         continue;
       }
       final account = Account.fromMap(rows.single);
-      if (account.canOverdraw) {
+      if (account.canOverdraw &&
+          account.currency == account.reportingCurrency) {
         continue;
       }
       final entries = (await db.query(
@@ -816,22 +1231,17 @@ class LedgerStore extends ChangeNotifier {
         whereArgs: [id, id],
         orderBy: 'date, id',
       )).map(LedgerEntry.fromMap).toList();
+      account.toBase(accountBalance(account, entries, DateTime.now()));
+      if (account.canOverdraw) continue;
       var balance = account.opening;
       final daily = <String, int>{};
       for (final entry in entries) {
-        if (entry.currency != account.currency ||
-            (account.includeOnAsOf
-                ? entry.date.isBefore(account.asOf)
-                : !entry.date.isAfter(account.asOf))) {
+        if ((account.includeOnAsOf
+            ? entry.date.isBefore(account.asOf)
+            : !entry.date.isAfter(account.asOf))) {
           continue;
         }
-        var delta = 0;
-        if (entry.accountId == id) {
-          delta = entry.accountChange;
-        }
-        if (entry.type == EntryType.transfer && entry.destinationId == id) {
-          delta += entry.amount;
-        }
+        final delta = entry.changeFor(account);
         daily.update(
           dayKey(entry.date),
           (value) => value + delta,
@@ -1087,8 +1497,8 @@ class LedgerStore extends ChangeNotifier {
       final accounts = await txn.query(
         'accounts',
         where: rule.type == EntryType.income
-            ? "id = ? AND currency = ?"
-            : "id = ? AND available = 1 AND currency = ?",
+            ? "id = ? AND COALESCE(base_currency, currency) = ?"
+            : "id = ? AND available = 1 AND COALESCE(base_currency, currency) = ?",
         whereArgs: [rule.accountId, currency.name],
       );
       if (accounts.isEmpty) {
@@ -1097,6 +1507,13 @@ class LedgerStore extends ChangeNotifier {
         );
       }
       final account = Account.fromMap(accounts.single);
+      if (rule.currency != null &&
+          rule.currency != currency &&
+          rule.currency != account.currency) {
+        throw ArgumentError(
+          'Choose the app or account currency for this recurring payment.',
+        );
+      }
       if (account.includeOnAsOf
           ? rule.nextDate.isBefore(account.asOf)
           : !rule.nextDate.isAfter(account.asOf)) {
@@ -1209,10 +1626,11 @@ class LedgerStore extends ChangeNotifier {
       }
       final transactionId = await _writeEntry(
         txn,
-        LedgerEntry(
+        _fromInput(
           type: occurrence.type,
-          amount: occurrence.amount,
-          currency: currency,
+          inputAmount: occurrence.amount,
+          inputCurrency: occurrence.currency ?? currency,
+          source: account,
           date: chargedOn,
           description: occurrence.description,
           category: occurrence.category,
@@ -1226,12 +1644,17 @@ class LedgerStore extends ChangeNotifier {
         where: 'id = ?',
         whereArgs: [id],
       );
-    } on ArgumentError catch (e) {
+    } catch (e) {
+      if (e is! ArgumentError && e is! FormatException) rethrow;
       await txn.execute('ROLLBACK TO recurring_post');
       await txn.execute('RELEASE recurring_post');
       await txn.update(
         'recurring_occurrences',
-        {'error': '${e.message}'},
+        {
+          'error': e is ArgumentError
+              ? '${e.message}'
+              : (e as FormatException).message,
+        },
         where: 'id = ?',
         whereArgs: [id],
       );
@@ -1276,6 +1699,7 @@ class LedgerStore extends ChangeNotifier {
             'type': rule.type.name,
             'description': rule.description,
             'amount': rule.amount,
+            'currency': rule.currency?.name,
             'category': rule.category,
             'account_id': rule.accountId,
             'status': 'failed',

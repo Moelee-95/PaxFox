@@ -29,6 +29,7 @@ class RecurringRule {
     this.type = EntryType.expense,
     this.isAsset = false,
     this.isLiability = false,
+    this.currency,
   });
   final int? id;
   final String description, category;
@@ -38,10 +39,12 @@ class RecurringRule {
   final bool active, archived;
   final bool isAsset, isLiability;
   final EntryType type;
+  final Currency? currency;
   Map<String, Object?> toMap() => {
     'description': description,
     'type': type.name,
     'amount': amount,
+    'currency': currency?.name,
     'category': category,
     'account_id': accountId,
     'day': day,
@@ -58,6 +61,9 @@ class RecurringRule {
     type: EntryType.values.byName((row['type'] as String?) ?? 'expense'),
     description: row['description'] as String,
     amount: row['amount'] as int,
+    currency: row['currency'] == null
+        ? null
+        : Currency.values.byName(row['currency'] as String),
     category: row['category'] as String,
     accountId: row['account_id'] as int,
     day: row['day'] as int,
@@ -86,6 +92,7 @@ class RecurringOccurrence {
     this.error,
     this.transactionId,
     this.type = EntryType.expense,
+    this.currency,
   });
   final int id, ruleId, amount, accountId;
   final DateTime date;
@@ -93,6 +100,7 @@ class RecurringOccurrence {
   final String? error;
   final int? transactionId;
   final EntryType type;
+  final Currency? currency;
   factory RecurringOccurrence.fromMap(Map<String, Object?> row) =>
       RecurringOccurrence(
         id: row['id'] as int,
@@ -101,6 +109,9 @@ class RecurringOccurrence {
         date: DateTime.parse(row['scheduled_date'] as String),
         description: row['description'] as String,
         amount: row['amount'] as int,
+        currency: row['currency'] == null
+            ? null
+            : Currency.values.byName(row['currency'] as String),
         accountId: row['account_id'] as int,
         category: row['category'] as String,
         status: row['status'] as String,

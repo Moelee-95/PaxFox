@@ -201,7 +201,7 @@ void main() {
       factory: databaseFactoryFfi,
     );
     try {
-      expect(await migrated.db.getVersion(), 13);
+      expect(await migrated.db.getVersion(), 14);
       expect(migrated.recurringRules.single.description, 'Existing schedule');
       expect(migrated.recurringRules.single.isAsset, isFalse);
       expect(migrated.recurringRules.single.isLiability, isFalse);

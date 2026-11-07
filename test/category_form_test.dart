@@ -200,7 +200,7 @@ void main() {
       factory: databaseFactoryFfi,
     );
     try {
-      expect(await migrated.db.getVersion(), 13);
+      expect(await migrated.db.getVersion(), 14);
       expect(migrated.categories.map((c) => c.id).toList(), ids);
       expect(migrated.categories.every((c) => c.color == null), isTrue);
       expect(migrated.entries.single.description, 'Migration test');

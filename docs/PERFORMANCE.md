@@ -101,3 +101,31 @@ The final production-ID release update preserved the installed data. Twenty More
 The reusable FL Chart card requests only the six visible existing monthly reports. Totals are already prepared/cached per snapshot, so touch selection and range navigation do not iterate the full ledger. Only the chart's local state rebuilds for touch selection; a repaint boundary isolates its paint work. Animations last 180ms and respect the system disable-animations setting. No new snapshot preprocessing, database query or persisted cache was introduced. These are structural bounds, not a new device frame-time benchmark.
 
 The denser chart revision always draws six months and uses FL Chart's native rod labels for permanent amounts (including zero/negative values). Redundant y-axis labels were removed so all six bar/month columns share the available width. Dense plot/month text caps scaling at 1.15 to keep columns legible; the exact-value summary retains the user's full text scaling. No additional report queries or canvas layers were added.
+
+
+## Invoice image preparation (2026-11-06)
+
+The former mobile path sampled with Flutter's codec, encoded a PNG intermediate, decoded that PNG in Dart, then encoded JPEG up to three times. It allowed 12 MP panoramas and decoded even already suitable small JPEGs. A timeout/cancel discarded UI results but left processing running, so retries could overlap that work.
+
+Android now samples with BitmapFactory before allocating pixels, applies EXIF orientation and performs one native JPEG encode on a background executor. The executor retires with its Flutter engine. iOS uses ImageIO thumbnail decoding with orientation transform and one JPEG encode on a serial queue. Both enforce a 4 MP output budget, 2,000px short edge and 6,000px long edge, without upscaling. Compatible unrotated JPEGs <=1 MiB bypass pixel decoding. A Dart queue serializes preparation across retries and extraction; canceled generations skip pending work and discard active results before writing. Picker-owned source files remain until their preparation settles. The 45-second watchdog still handles broken/stalled file or OS operations; it does not enforce CPU cancellation inside an OS decoder.
+
+Synthetic measurements on the connected SM-S916B (Android 17), isolated `de.alhayali.moneva.benchmark` package:
+
+| Synthetic source | Old release | Native release | Native debug |
+| --- | --- | --- | --- |
+| 8 MP gray detail | 3,468 ms | 253 ms | 201 ms |
+| 12 MP gray detail | 5,065 ms | 233 ms | 302 ms |
+| 12 MP EXIF-rotated | 5,954 ms | 253 ms | 349 ms |
+| 12 MP panorama | 4,441 ms | 341 ms | 293 ms |
+
+Native runs also checked a 500x700 JPEG remained byte-identical, output pixel bounds, EXIF rotation/aspect ratio, JPEG format, source preservation and cached-byte identity. The old panorama produced a 6.43 MB/12 MP upload; the new one is 3,464x1,154 (<4 MP). Cached reads avoid further image processing. An explicit legacy debug replica took 5,352 ms for the 12 MP photo. The reported 45-second failure was not reproduced on this device; these measurements demonstrate removal of the costly stages, not a guarantee for every file/device. iOS native build/runtime checks require macOS/Xcode and remain unverified.
+
+`tool/profile_invoice_preparation.dart` creates only synthetic temporary images and never opens the ledger or calls Gemini. From `android/`, build its isolated APK with:
+
+```powershell
+.\gradlew.bat assembleRelease '-PpaxfoxBenchmark=true' '-Ptarget=tool/profile_invoice_preparation.dart' '-Ptarget-platform=android-arm64' '-Pdart-defines=UEFYRk9YX0JFTkNITUFSSz10cnVl'
+```
+
+Use `assembleDebug` to include the legacy comparison; that comparison uses a separately killable isolate with a two-minute bound. Verify the APK package ID before installing and remove only the benchmark package afterward. Per-fixture `PAXFOX_IMAGE_RESULT` logs are authoritative because Android may truncate the aggregate JSON line. Local results/logs: `build/image-benchmark-baseline-results.json`, `build/image-benchmark-native-release-results.json`, `build/image-benchmark-native-debug-results.json`, `build/image-benchmark-legacy-debug-results.json` and matching device logs. The benchmark package was removed; the production app/database were untouched.
+
+Validation: 11 image-preparation tests and 7 scanner tests pass, including strict pixel rounding, cancellation/retry serialization, stale queued job skipping, source preservation and cache reuse. Analyzer clean. Full suite: 220 passed, with the previously observed unrelated category-screen large-text ListTile layout failure in `bottom_sheets_test.dart`.

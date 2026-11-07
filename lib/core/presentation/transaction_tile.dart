@@ -165,6 +165,15 @@ class TransactionTile extends StatelessWidget {
                             heading,
                             const SizedBox(height: 3),
                             metadata,
+                            if (entry.fx != null) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                transfer
+                                    ? '${entry.fx!.sourceCurrency.display(entry.fx!.sourceAmount)} \u2192 ${entry.fx!.targetCurrency!.display(entry.fx!.targetAmount!)}\n${entry.fx!.transferRate}'
+                                    : '${entry.fx!.sourceCurrency.display(entry.fx!.sourceAmount)} \u00b7 1 ${entry.currency.code} = ${entry.fx!.sourceRate} ${entry.fx!.sourceCurrency.code}',
+                                style: metadataStyle,
+                              ),
+                            ],
                           ],
                         );
                       },

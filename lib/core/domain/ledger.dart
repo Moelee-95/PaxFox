@@ -1,4 +1,9 @@
+import 'dart:convert';
+
+import 'exchange_rate.dart';
 import 'number_format.dart';
+
+export 'exchange_rate.dart';
 
 enum EntryType { expense, income, refund, transfer }
 
@@ -67,6 +72,9 @@ class LedgerEntry {
     this.destinationId,
     this.notes = '',
     this.createdAt,
+    this.accountAmount,
+    this.destinationAmount,
+    this.fx,
   });
   final int? id;
   final EntryType type;
@@ -76,6 +84,47 @@ class LedgerEntry {
   final DateTime? createdAt;
   final String description, category, notes;
   final int? accountId, destinationId;
+  // Current native account units, distinct from the frozen reporting amount.
+  final int? accountAmount, destinationAmount;
+  final FxSnapshot? fx;
+
+  LedgerEntry withAmounts({
+    int? amount,
+    int? accountAmount,
+    int? destinationAmount,
+    FxSnapshot? fx,
+  }) => LedgerEntry(
+    id: id,
+    type: type,
+    amount: amount ?? this.amount,
+    currency: currency,
+    date: date,
+    description: description,
+    category: category,
+    accountId: accountId,
+    destinationId: destinationId,
+    notes: notes,
+    createdAt: createdAt,
+    accountAmount: accountAmount ?? this.accountAmount,
+    destinationAmount: destinationAmount ?? this.destinationAmount,
+    fx: fx ?? this.fx,
+  );
+
+  int changeFor(Account account) {
+    var change = 0;
+    if (accountId == account.id) {
+      final native =
+          accountAmount ?? (currency == account.currency ? amount : 0);
+      change += (type == EntryType.income || type == EntryType.refund)
+          ? native
+          : -native;
+    }
+    if (type == EntryType.transfer && destinationId == account.id) {
+      change +=
+          destinationAmount ?? (currency == account.currency ? amount : 0);
+    }
+    return change;
+  }
 
   int get accountChange => switch (type) {
     EntryType.income || EntryType.refund => amount,
@@ -92,6 +141,9 @@ class LedgerEntry {
     'account_id': accountId,
     'destination_id': destinationId,
     'notes': notes,
+    'account_amount': accountAmount,
+    'destination_amount': destinationAmount,
+    'fx_snapshot': fx == null ? null : jsonEncode(fx!.toMap()),
   };
   factory LedgerEntry.fromMap(Map<String, Object?> row) => LedgerEntry(
     id: row['id'] as int,
@@ -105,7 +157,75 @@ class LedgerEntry {
     destinationId: row['destination_id'] as int?,
     notes: row['notes'] as String,
     createdAt: DateTime.tryParse(row['created_at'] as String? ?? ''),
+    accountAmount: row['account_amount'] as int?,
+    destinationAmount: row['destination_amount'] as int?,
+    fx: row['fx_snapshot'] == null
+        ? null
+        : FxSnapshot.fromMap(
+            jsonDecode(row['fx_snapshot'] as String) as Map<String, dynamic>,
+          ),
   );
+}
+
+/// Immutable original input and bank amounts/rates, retained even if an account
+/// later changes currency. Transfers show the actual pair supplied by the user.
+class FxSnapshot {
+  const FxSnapshot({
+    required this.inputCurrency,
+    required this.inputAmount,
+    required this.sourceCurrency,
+    required this.sourceAmount,
+    required this.sourceRate,
+    this.targetCurrency,
+    this.targetAmount,
+    this.targetRate,
+  });
+  final Currency inputCurrency, sourceCurrency;
+  final int inputAmount, sourceAmount;
+  final String sourceRate;
+  final Currency? targetCurrency;
+  final int? targetAmount;
+  final String? targetRate;
+  Map<String, Object?> toMap() => {
+    'input_currency': inputCurrency.name,
+    'input_amount': inputAmount,
+    'source_currency': sourceCurrency.name,
+    'source_amount': sourceAmount,
+    'source_rate': sourceRate,
+    'target_currency': targetCurrency?.name,
+    'target_amount': targetAmount,
+    'target_rate': targetRate,
+  };
+  factory FxSnapshot.fromMap(Map<String, dynamic> map) => FxSnapshot(
+    inputCurrency: Currency.values.byName(map['input_currency'] as String),
+    inputAmount: map['input_amount'] as int,
+    sourceCurrency: Currency.values.byName(map['source_currency'] as String),
+    sourceAmount: map['source_amount'] as int,
+    sourceRate: map['source_rate'] as String,
+    targetCurrency: map['target_currency'] == null
+        ? null
+        : Currency.values.byName(map['target_currency'] as String),
+    targetAmount: map['target_amount'] as int?,
+    targetRate: map['target_rate'] as String?,
+  );
+  String? get transferRate {
+    if (targetCurrency == null || targetAmount == null || sourceAmount <= 0) {
+      return null;
+    }
+    final numerator =
+        BigInt.from(targetAmount!) *
+        BigInt.from(sourceCurrency.scale) *
+        BigInt.from(1000000000);
+    final denominator =
+        BigInt.from(sourceAmount) * BigInt.from(targetCurrency!.scale);
+    final scaled = (numerator + denominator ~/ BigInt.two) ~/ denominator;
+    final whole = scaled ~/ BigInt.from(1000000000);
+    final tail = (scaled % BigInt.from(1000000000))
+        .toString()
+        .padLeft(9, '0')
+        .replaceFirst(RegExp(r'0+$'), '');
+    return '1 ${sourceCurrency.code} = $whole${tail.isEmpty ? '' : '.$tail'} ${targetCurrency!.code}';
+  }
 }
 
 enum AccountKind { cash, bank }
@@ -121,6 +241,8 @@ class Account {
     this.kind = AccountKind.bank,
     this.includeOnAsOf = false,
     this.allowOverdraft = false,
+    this.baseCurrency,
+    this.exchangeRate = '1',
   });
   final int? id;
   final String name;
@@ -131,6 +253,23 @@ class Account {
   final AccountKind kind;
   final bool includeOnAsOf;
   final bool allowOverdraft;
+  final Currency? baseCurrency;
+  final String exchangeRate;
+  Currency get reportingCurrency => baseCurrency ?? currency;
+  ExchangeRate get rate =>
+      ExchangeRate.parse(currency == reportingCurrency ? '1' : exchangeRate);
+  int toBase(int native) => currency == reportingCurrency
+      ? native
+      : rate.toBase(native, currency.scale, reportingCurrency.scale);
+  int fromBase(int base) => currency == reportingCurrency
+      ? base
+      : rate.fromBase(base, reportingCurrency.scale, currency.scale);
+  int convertTo(Account target, int native) => rate.convertTo(
+    native,
+    currency.scale,
+    target.rate,
+    target.currency.scale,
+  );
   bool get canOverdraw => kind == AccountKind.bank && allowOverdraft;
   Map<String, Object?> toMap() => {
     'name': name,
@@ -141,6 +280,8 @@ class Account {
     'kind': kind.name,
     'include_on_as_of': includeOnAsOf ? 1 : 0,
     'allow_overdraft': canOverdraw ? 1 : 0,
+    'base_currency': reportingCurrency.name,
+    'exchange_rate': exchangeRate,
   };
   factory Account.fromMap(Map<String, Object?> row) => Account(
     id: row['id'] as int,
@@ -152,6 +293,10 @@ class Account {
     kind: AccountKind.values.byName((row['kind'] as String?) ?? 'bank'),
     includeOnAsOf: row['include_on_as_of'] == 1,
     allowOverdraft: row['allow_overdraft'] == 1,
+    baseCurrency: row['base_currency'] == null
+        ? null
+        : Currency.values.byName(row['base_currency'] as String),
+    exchangeRate: row['exchange_rate'] as String? ?? '1',
   );
 }
 
@@ -188,15 +333,7 @@ int accountBalance(
         entry.date.isAfter(end)) {
       continue;
     }
-    if (entry.currency != account.currency) {
-      continue;
-    }
-    if (entry.accountId == account.id) {
-      balance += entry.accountChange;
-    }
-    if (entry.type == EntryType.transfer && entry.destinationId == account.id) {
-      balance += entry.amount;
-    }
+    balance += entry.changeFor(account);
   }
   return balance;
 }

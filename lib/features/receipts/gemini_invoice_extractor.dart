@@ -18,12 +18,16 @@ abstract interface class InvoiceExtractor {
 class GeminiInvoiceExtractor implements InvoiceExtractor {
   GeminiInvoiceExtractor({
     this.client,
+    this.configUrl = GeminiKeyProvider.configUrl,
+    this.manualKey,
     this.keyLoader,
     this.timeout = const Duration(seconds: 180),
     this.onProgress,
     this.currency = Currency.eur,
     this.type = EntryType.expense,
   });
+  final String configUrl;
+  final String? manualKey;
   final Duration timeout;
   final Currency currency;
   final EntryType type;
@@ -135,7 +139,12 @@ Money must be decimal STRINGS with dot, no grouping, max ${currency.exponent} de
       onProgress?.call('Connecting to Gemini');
       final key =
           await (keyLoader?.call() ??
-              GeminiKeyProvider.fetchKey(client: requestClient));
+              (manualKey != null
+                  ? Future.value(manualKey!)
+                  : GeminiKeyProvider.fetchKey(
+                      client: requestClient,
+                      sourceUrl: configUrl,
+                    )));
       _checkCancelled();
       onProgress?.call('Waiting for Gemini to extract items');
       final response = await requestClient.post(

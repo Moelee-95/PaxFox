@@ -19,8 +19,8 @@ void main() {
         nonce: List<int>.generate(12, (i) => i),
       );
       final client = MockClient((request) async {
-        expect(request.url.host, 'alhayali.de');
-        expect(request.url.path, '/card_lens/gemini-config.json');
+        expect(request.url.host, 'api.moelee.de');
+        expect(request.url.path, '/api/v1/gemini-config');
         expect(request.url.queryParameters, contains('requestedAt'));
         expect(request.headers['Cache-Control'], 'no-cache, no-store');
         return http.Response(
@@ -37,6 +37,22 @@ void main() {
       expect(await GeminiKeyProvider.fetchKey(client: client), testKey);
     },
   );
+  test('custom source preserves existing query parameters', () async {
+    final client = MockClient((request) async {
+      expect(request.url.host, 'example.com');
+      expect(request.url.path, '/custom.json');
+      expect(request.url.queryParameters['app'], 'paxfox');
+      expect(request.url.queryParameters, contains('requestedAt'));
+      return http.Response('{}', 200);
+    });
+    await expectLater(
+      GeminiKeyProvider.fetchKey(
+        client: client,
+        sourceUrl: 'https://example.com/custom.json?app=paxfox',
+      ),
+      throwsA(isA<GeminiKeyException>()),
+    );
+  });
   test(
     'config errors and malformed payloads are safe and fail closed',
     () async {

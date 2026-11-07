@@ -35,11 +35,36 @@ class TransactionCsv {
     'Currency',
   ];
 
+  static const fxHeaders = [
+    ...accountHeaders,
+    'Account currency',
+    'Account amount',
+    'Destination currency',
+    'Destination amount',
+    'FX details',
+  ];
+
   static String encode(
     Iterable<LedgerEntry> entries, {
     List<Account>? accounts,
   }) {
+    final values = entries.toList();
     final byId = {for (final a in accounts ?? <Account>[]) a.id: a};
+    final hasFx =
+        accounts != null &&
+        values.any(
+          (e) =>
+              e.fx != null ||
+              (byId[e.accountId] != null &&
+                  byId[e.accountId]!.currency != e.currency) ||
+              (byId[e.destinationId] != null &&
+                  byId[e.destinationId]!.currency != e.currency),
+        );
+    if (accounts == null && values.any((e) => e.fx != null)) {
+      throw const FormatException(
+        'Include accounts when exporting foreign-currency transactions.',
+      );
+    }
     final nameCounts = <String, int>{};
     for (final a in byId.values) {
       final name = a.name.trim().toLowerCase();
@@ -60,8 +85,12 @@ class TransactionCsv {
     }
 
     return Csv(addBom: true).encode([
-      accounts == null ? headers : accountHeaders,
-      for (final e in entries)
+      accounts == null
+          ? headers
+          : hasFx
+          ? fxHeaders
+          : accountHeaders,
+      for (final e in values)
         [
           '${e.date.day}.${e.date.month}.${e.date.year >= 2000 && e.date.year <= 2099 ? (e.date.year % 100).toString().padLeft(2, '0') : e.date.year.toString().padLeft(4, '0')}',
           e.description,
@@ -73,6 +102,22 @@ class TransactionCsv {
             e.type.name,
             accountName(e.destinationId),
             e.currency.code,
+            if (hasFx) ...[
+              byId[e.accountId]?.currency.code ?? '',
+              e.accountId == null
+                  ? ''
+                  : byId[e.accountId]!.currency.format(
+                      e.accountAmount ?? byId[e.accountId]!.fromBase(e.amount),
+                    ),
+              byId[e.destinationId]?.currency.code ?? '',
+              e.destinationId == null
+                  ? ''
+                  : byId[e.destinationId]!.currency.format(
+                      e.destinationAmount ??
+                          byId[e.destinationId]!.fromBase(e.amount),
+                    ),
+              e.fx == null ? '' : jsonEncode(e.fx!.toMap()),
+            ],
           ],
         ],
     ]);
@@ -119,7 +164,10 @@ class TransactionCsv {
         .toList();
     final hasAssignments =
         header.contains('account') || header.contains('type');
-    final expected = hasAssignments ? accountHeaders : headers;
+    final hasFx = header.contains('account amount');
+    final expected = hasAssignments
+        ? (hasFx ? fxHeaders : accountHeaders)
+        : headers;
     if (header.length != expected.length ||
         header.toSet().length != header.length ||
         expected.any((h) => !header.contains(h.toLowerCase()))) {
@@ -147,7 +195,7 @@ class TransactionCsv {
               : 'Account "$name" is ambiguous. Give the accounts different names.',
         );
       }
-      if (matches.single.currency != currency) {
+      if (matches.single.reportingCurrency != currency) {
         throw const FormatException('Account must use the app currency.');
       }
       return matches.single.id;
@@ -207,6 +255,49 @@ class TransactionCsv {
         if (rowType != EntryType.transfer && fields[2].trim().isEmpty) {
           throw const FormatException('Category is required.');
         }
+        int? nativeAmount(int? id, int currencyIndex, int amountIndex) {
+          if (id == null) {
+            if (fields[currencyIndex].isNotEmpty ||
+                fields[amountIndex].isNotEmpty) {
+              throw const FormatException(
+                'Unassigned entries cannot have native account amounts.',
+              );
+            }
+            return null;
+          }
+          final account = accounts.firstWhere((a) => a.id == id);
+          if (fields[currencyIndex].trim().toUpperCase() !=
+              account.currency.code) {
+            throw const FormatException(
+              'Native account currency differs from this CSV. Check account settings first.',
+            );
+          }
+          return parseCost(fields[amountIndex], currency: account.currency);
+        }
+
+        FxSnapshot? snapshot;
+        if (hasFx && fields[13].isNotEmpty) {
+          try {
+            snapshot = FxSnapshot.fromMap(
+              jsonDecode(fields[13]) as Map<String, dynamic>,
+            );
+            ExchangeRate.parse(snapshot.sourceRate);
+            if (snapshot.targetRate != null) {
+              ExchangeRate.parse(snapshot.targetRate!);
+            }
+            for (final value in [
+              snapshot.inputAmount,
+              snapshot.sourceAmount,
+              snapshot.targetAmount,
+            ].whereType<int>()) {
+              if (value <= 0 || value > 9000000000000000) {
+                throw const FormatException('Invalid FX amount.');
+              }
+            }
+          } catch (_) {
+            throw const FormatException('Invalid FX details.');
+          }
+        }
         rows.add(
           CsvTransactionRow(
             number: i + 1,
@@ -222,6 +313,11 @@ class TransactionCsv {
               accountId: sourceId,
               destinationId: destinationId,
               notes: fields[4],
+              accountAmount: hasFx ? nativeAmount(sourceId, 9, 10) : null,
+              destinationAmount: hasFx
+                  ? nativeAmount(destinationId, 11, 12)
+                  : null,
+              fx: snapshot,
             ),
           ),
         );
