@@ -74,7 +74,7 @@ void main() {
   }
 
   testWidgets(
-    'two-column add menu keeps six actions accessible on small phones',
+    'two-column add menu keeps eight actions accessible on small phones',
     (tester) async {
       phone(tester);
       await tester.runAsync(
@@ -122,8 +122,11 @@ void main() {
       );
       await tester.pumpAndSettle();
       await preview(tester, 'add-expense-income-large-text');
+      final close = find.byTooltip('Cancel adding transaction');
+      expect(close.hitTestable(), findsOneWidget);
+      expect(tester.getBottomRight(close).dy, lessThan(740));
       for (final type in ['expense', 'income']) {
-        for (final action in ['manual', 'scan', 'upload']) {
+        for (final action in ['manual', 'scan', 'gallery', 'upload']) {
           final button = find.byKey(ValueKey('create-$type-$action'));
           await tester.ensureVisible(button);
           expect(button.hitTestable(), findsOneWidget);
@@ -274,7 +277,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Add transaction'));
       await tester.pumpAndSettle();
-      expect(find.text('Upload file'), findsNWidgets(2));
+      expect(find.text('File'), findsNWidgets(2));
       await tester.tap(find.byKey(const ValueKey('create-expense-manual')));
       await tester.pumpAndSettle();
       final fieldContext = tester.element(find.byType(TextFormField).first);

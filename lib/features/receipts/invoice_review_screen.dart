@@ -23,12 +23,14 @@ class InvoiceReviewScreen extends StatefulWidget {
     this.images = const [],
     this.storedPaths = const [],
     this.entry,
+    this.onSavedDate,
   });
   final LedgerStore store;
   final InvoiceDraft draft;
   final List<File> images;
   final List<String> storedPaths;
   final LedgerEntry? entry;
+  final ValueChanged<DateTime>? onSavedDate;
   @override
   State<InvoiceReviewScreen> createState() => _InvoiceReviewScreenState();
 }
@@ -176,6 +178,13 @@ class _InvoiceReviewScreenState extends State<InvoiceReviewScreen> {
         );
       }
       if (mounted) {
+        final dates =
+            items
+                .map((item) => item.date ?? date)
+                .whereType<DateTime>()
+                .toList()
+              ..sort();
+        if (dates.isNotEmpty) widget.onSavedDate?.call(dates.last);
         Navigator.pop(context, true);
       }
     } catch (e) {

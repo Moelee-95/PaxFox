@@ -32,8 +32,10 @@ class InvoiceScanScreen extends StatefulWidget {
     this.initialImages = const [],
     this.extractionTimeout,
     this.imagePreparation,
+    this.onSavedDate,
   });
   final LedgerStore store;
+  final ValueChanged<DateTime>? onSavedDate;
   final InvoiceExtractor? extractor;
   final bool autoCapture;
   final bool initialGallery;
@@ -261,10 +263,8 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
         unawaited(() async {
           await Future.wait(
             preparationTasks.map(
-              (task) => task.then<void>(
-                (_) {},
-                onError: (Object _, StackTrace _) {},
-              ),
+              (task) =>
+                  task.then<void>((_) {}, onError: (Object _, StackTrace _) {}),
             ),
           );
           try {
@@ -289,6 +289,7 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
       MaterialPageRoute(
         builder: (_) => InvoiceReviewScreen(
           store: widget.store,
+          onSavedDate: widget.onSavedDate,
           draft: widget.type == draft.type
               ? draft
               : InvoiceDraft(

@@ -17,11 +17,15 @@ class TransactionForm extends StatefulWidget {
     this.entry,
     this.initialType = EntryType.expense,
     this.onSavedType,
+    this.onSavedDate,
+    this.initialDate,
   });
   final LedgerStore store;
   final LedgerEntry? entry;
   final EntryType initialType;
   final ValueChanged<EntryType>? onSavedType;
+  final ValueChanged<DateTime>? onSavedDate;
+  final DateTime? initialDate;
   @override
   State<TransactionForm> createState() => _TransactionFormState();
 }
@@ -36,6 +40,7 @@ class _TransactionFormState extends State<TransactionForm> {
   late EntryType type;
   late Currency currency;
   late DateTime date;
+  DateTime? createdAt;
   int? accountId, destinationId;
   late final action = AsyncAction()..addListener(() => setState(() {}));
   bool get saving => action.busy;
@@ -53,7 +58,8 @@ class _TransactionFormState extends State<TransactionForm> {
     }
     currency = e?.currency ?? widget.store.currency;
     type = e?.type ?? widget.initialType;
-    date = e?.date ?? dateOnly(DateTime.now());
+    date = e?.date ?? widget.initialDate ?? dateOnly(DateTime.now());
+    createdAt = e?.createdAt;
     accountId = e?.accountId;
     destinationId = e?.destinationId;
     final source = selectedAccount;
@@ -150,12 +156,13 @@ class _TransactionFormState extends State<TransactionForm> {
                     ? destinationAccount!.currency.parseInput(received.text)
                     : null,
               );
-        await widget.store.saveEntry(entry);
+        await widget.store.saveEntry(entry, createdAt: createdAt);
       },
       failureMessage: 'Could not save. Check the fields and account currencies, then retry.',
     );
     if (saved && mounted) {
       widget.onSavedType?.call(type);
+      widget.onSavedDate?.call(date);
       Navigator.pop(context, true);
     }
   }
@@ -337,8 +344,6 @@ class _TransactionFormState extends State<TransactionForm> {
                 ? 'Income document'
                 : 'Scanned invoice',
           ),
-        if (widget.entry?.createdAt != null)
-          Text('Added ${creationTimestamp(context, widget.entry!.createdAt!)}'),
         TextFormField(
           controller: description,
           enabled: !saving,
@@ -425,6 +430,43 @@ class _TransactionFormState extends State<TransactionForm> {
                   },
           ),
         ),
+        if (createdAt != null)
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.history),
+              title: Text(
+                'Added on: ${creationTimestamp(context, createdAt!)}',
+              ),
+              trailing: const Icon(Icons.edit_outlined),
+              onTap: saving
+                  ? null
+                  : () async {
+                      final original = createdAt!.toLocal();
+                      final chosen = await showDatePicker(
+                        context: context,
+                        initialDate: dateOnly(original),
+                        firstDate: DateTime(1900),
+                        lastDate: DateTime(2100),
+                      );
+                      if (chosen == null || !context.mounted) return;
+                      final time = await showTimePicker(
+                        context: context,
+                        initialTime: TimeOfDay.fromDateTime(original),
+                      );
+                      if (time != null && mounted) {
+                        setState(
+                          () => createdAt = DateTime(
+                            chosen.year,
+                            chosen.month,
+                            chosen.day,
+                            time.hour,
+                            time.minute,
+                          ).toUtc(),
+                        );
+                      }
+                    },
+            ),
+          ),
         const SizedBox(height: 12),
         TextFormField(
           controller: notes,

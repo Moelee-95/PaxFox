@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
 
 import '../core/data/ledger_store.dart';
+import '../core/data/recurring_notifications.dart';
 import '../core/domain/ledger.dart';
 import '../core/domain/number_format.dart';
 import '../core/presentation/ledger_refresh.dart';
@@ -210,10 +211,22 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _checkRecurring();
+    RecurringNotifications.instance?.message.addListener(_reminderMessage);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _reminderMessage());
+  }
+
+  void _reminderMessage() {
+    final value = RecurringNotifications.instance?.message.value;
+    if (value != null && mounted) {
+      RecurringNotifications.instance?.message.value = null;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(value)));
+    }
   }
 
   @override
   void dispose() {
+    RecurringNotifications.instance?.message.removeListener(_reminderMessage);
     _exitTimer?.cancel();
     _homeEdgeDrag?.cancel();
     _pageController.dispose();
@@ -230,6 +243,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       _exitTimer?.cancel();
       _checkRecurring();
+      RecurringNotifications.instance?.sync();
     }
   }
 
@@ -292,6 +306,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           store: widget.store,
           type: action.type,
           initialUpload: action.action == TransactionCreation.upload,
+          initialGallery: action.action == TransactionCreation.gallery,
+          onSavedDate: (date) => _month = DateTime(date.year, date.month),
         ),
       ),
     );
@@ -319,6 +335,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       }
       if (_openingTransaction) setState(() => _openingTransaction = false);
       var savedType = initialType;
+      var savedDate = entry?.date ?? _month;
       final saved = receipt == null
           ? await showAppSheet<bool>(
               context,
@@ -328,6 +345,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                 entry: entry,
                 initialType: initialType,
                 onSavedType: (type) => savedType = type,
+                onSavedDate: (date) => savedDate = date,
+                initialDate:
+                    _month.year == DateTime.now().year &&
+                        _month.month == DateTime.now().month
+                    ? dateOnly(DateTime.now())
+                    : DateTime(_month.year, _month.month),
               ),
             )
           : await Navigator.of(context).push<bool>(
@@ -335,6 +358,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                 builder: (_) => InvoiceReviewScreen(
                   store: widget.store,
                   entry: entry,
+                  onSavedDate: (date) => savedDate = date,
                   draft: InvoiceDraft.fromMap(
                     jsonDecode(receipt['draft'] as String)
                         as Map<String, dynamic>,
@@ -346,7 +370,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               ),
             );
       if (saved == true && mounted) {
-        _goHome(type: entry == null ? savedType : null);
+        _goHome(type: entry == null ? savedType : null, date: savedDate);
       }
     } catch (_) {
       if (mounted) {
@@ -363,9 +387,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     }
   }
 
-  void _goHome({EntryType? type}) {
+  void _goHome({EntryType? type, DateTime? date}) {
     _changeHome(() {
-      _month = DateTime(DateTime.now().year, DateTime.now().month);
+      if (date != null) _month = DateTime(date.year, date.month);
       if (type != null) {
         _homeTab = type == EntryType.income ? 1 : 0;
         _homeCategory = null;
@@ -417,6 +441,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   Widget _transactionTile(LedgerEntry entry, {bool compact = false}) =>
       TransactionTile(
+        invoiceLabel: widget.store.invoiceGroups[entry.id]?.label,
         key: ValueKey(entry.id),
         entry: entry,
         categoryIcon: widget.store.iconFor(entry),
@@ -628,6 +653,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           ? null
           : FloatingActionButton(
               key: _addButtonKey,
+              backgroundColor: Theme.of(context).colorScheme.primaryContainer
+                  .withValues(alpha: .78),
+              elevation: 1,
               onPressed: _createTransaction,
               tooltip: 'Add transaction',
               child: const Icon(Icons.add),

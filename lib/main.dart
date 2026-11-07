@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'core/data/ledger_store.dart';
+import 'core/data/recurring_notifications.dart';
 import 'core/presentation/app_theme.dart';
 import 'core/presentation/store_status.dart';
 import 'screens/main_screen.dart';
@@ -30,9 +31,20 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
-    _store = widget.store == null
-        ? LedgerStore.open()
-        : Future.value(widget.store);
+    _store = widget.store == null ? _openStore() : Future.value(widget.store);
+  }
+
+  Future<LedgerStore> _openStore() async {
+    final store = await LedgerStore.open();
+    final reminders = RecurringNotifications(store);
+    RecurringNotifications.instance = reminders;
+    try {
+      await reminders.initialize();
+    } catch (_) {
+      reminders.message.value =
+          'Reminders are unavailable. Pending payments remain in Recurring.';
+    }
+    return store;
   }
 
   @override
@@ -58,8 +70,7 @@ class _MyAppState extends State<MyApp> {
                         'Local storage could not be opened. Your data has not been reset.',
                       ),
                       FilledButton(
-                        onPressed: () =>
-                            setState(() => _store = LedgerStore.open()),
+                        onPressed: () => setState(() => _store = _openStore()),
                         child: const Text('Retry'),
                       ),
                     ],

@@ -13,6 +13,51 @@ DateTime firstMonthlyDate(DateTime start, int day) {
       : candidate;
 }
 
+enum RecurrenceFrequency { day, week, month, year }
+
+DateTime firstRecurringDate(
+  DateTime start,
+  RecurrenceFrequency frequency,
+  int day,
+  int month,
+) {
+  final date = dateOnly(start);
+  switch (frequency) {
+    case RecurrenceFrequency.day:
+      return date;
+    case RecurrenceFrequency.week:
+      return DateTime(
+        date.year,
+        date.month,
+        date.day + (day - date.weekday + 7) % 7,
+      );
+    case RecurrenceFrequency.month:
+      return firstMonthlyDate(date, day);
+    case RecurrenceFrequency.year:
+      final candidate = monthlyDate(date.year, month, day);
+      return candidate.isBefore(date)
+          ? monthlyDate(date.year + 1, month, day)
+          : candidate;
+  }
+}
+
+DateTime nextRecurringDate(
+  DateTime due,
+  RecurrenceFrequency frequency,
+  int interval,
+  int day,
+  int month,
+) => switch (frequency) {
+  RecurrenceFrequency.day => DateTime(due.year, due.month, due.day + interval),
+  RecurrenceFrequency.week => DateTime(
+    due.year,
+    due.month,
+    due.day + 7 * interval,
+  ),
+  RecurrenceFrequency.month => monthlyDate(due.year, due.month + interval, day),
+  RecurrenceFrequency.year => monthlyDate(due.year + interval, month, day),
+};
+
 class RecurringRule {
   const RecurringRule({
     this.id,
@@ -30,6 +75,10 @@ class RecurringRule {
     this.isAsset = false,
     this.isLiability = false,
     this.currency,
+    this.frequency = RecurrenceFrequency.month,
+    this.month = 1,
+    this.automatic = true,
+    this.reminderMinutes = 540,
   });
   final int? id;
   final String description, category;
@@ -40,11 +89,21 @@ class RecurringRule {
   final bool isAsset, isLiability;
   final EntryType type;
   final Currency? currency;
+  final RecurrenceFrequency frequency;
+  final int month, reminderMinutes;
+  final bool automatic;
+  DateTime get next =>
+      nextRecurringDate(nextDate, frequency, interval, day, month);
+  String get scheduleLabel => 'every $interval ${frequency.name}(s)';
   Map<String, Object?> toMap() => {
     'description': description,
     'type': type.name,
     'amount': amount,
     'currency': currency?.name,
+    'frequency': frequency.name,
+    'month': month,
+    'automatic': automatic ? 1 : 0,
+    'reminder_minutes': reminderMinutes,
     'category': category,
     'account_id': accountId,
     'day': day,
@@ -58,6 +117,12 @@ class RecurringRule {
   };
   factory RecurringRule.fromMap(Map<String, Object?> row) => RecurringRule(
     id: row['id'] as int,
+    frequency: RecurrenceFrequency.values.byName(
+      row['frequency'] as String? ?? 'month',
+    ),
+    month: row['month'] as int? ?? 1,
+    automatic: row['automatic'] != 0,
+    reminderMinutes: row['reminder_minutes'] as int? ?? 540,
     type: EntryType.values.byName((row['type'] as String?) ?? 'expense'),
     description: row['description'] as String,
     amount: row['amount'] as int,
@@ -93,6 +158,7 @@ class RecurringOccurrence {
     this.transactionId,
     this.type = EntryType.expense,
     this.currency,
+    this.manual = false,
   });
   final int id, ruleId, amount, accountId;
   final DateTime date;
@@ -101,9 +167,11 @@ class RecurringOccurrence {
   final int? transactionId;
   final EntryType type;
   final Currency? currency;
+  final bool manual;
   factory RecurringOccurrence.fromMap(Map<String, Object?> row) =>
       RecurringOccurrence(
         id: row['id'] as int,
+        manual: row['manual'] == 1,
         type: EntryType.values.byName((row['type'] as String?) ?? 'expense'),
         ruleId: row['rule_id'] as int,
         date: DateTime.parse(row['scheduled_date'] as String),

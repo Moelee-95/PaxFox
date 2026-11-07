@@ -19,7 +19,7 @@ class LedgerDatabase {
     final db = await (factory ?? databaseFactorySqflitePlugin).openDatabase(
       location,
       options: OpenDatabaseOptions(
-        version: 14,
+        version: 15,
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) {
             await db.execute(
@@ -60,6 +60,7 @@ class LedgerDatabase {
             await _addCategoryColors(db);
           }
           if (oldVersion < 14) await _addForeignCurrencyAccounts(db);
+          if (oldVersion < 15) await _addRecurringSchedules(db);
         },
         // Table rebuild in v12 preserves dependent receipt/history links.
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = OFF'),
@@ -96,10 +97,38 @@ class LedgerDatabase {
           await _upgradeCurrencyAndDebts(db);
           await _addCategoryColors(db);
           await _addForeignCurrencyAccounts(db);
+          await _addRecurringSchedules(db);
         },
       ),
     );
     return db;
+  }
+
+  static Future<void> _addRecurringSchedules(DatabaseExecutor db) async {
+    await db.execute(
+      'CREATE TABLE IF NOT EXISTS recurring_reminders (id INTEGER PRIMARY KEY AUTOINCREMENT, rule_id INTEGER NOT NULL REFERENCES recurring_rules(id), due_date TEXT NOT NULL, UNIQUE(rule_id, due_date))',
+    );
+    for (final column in {
+      'frequency': "TEXT NOT NULL DEFAULT 'month'",
+      'month': 'INTEGER NOT NULL DEFAULT 1',
+      'automatic': 'INTEGER NOT NULL DEFAULT 1',
+      'reminder_minutes': 'INTEGER NOT NULL DEFAULT 540',
+    }.entries) {
+      final columns = await db.rawQuery('PRAGMA table_info(recurring_rules)');
+      if (!columns.any((row) => row['name'] == column.key)) {
+        await db.execute(
+          'ALTER TABLE recurring_rules ADD COLUMN ${column.key} ${column.value}',
+        );
+      }
+    }
+    final columns = await db.rawQuery(
+      'PRAGMA table_info(recurring_occurrences)',
+    );
+    if (!columns.any((row) => row['name'] == 'manual')) {
+      await db.execute(
+        'ALTER TABLE recurring_occurrences ADD COLUMN manual INTEGER NOT NULL DEFAULT 0',
+      );
+    }
   }
 
   static Future<void> _addForeignCurrencyAccounts(DatabaseExecutor db) async {

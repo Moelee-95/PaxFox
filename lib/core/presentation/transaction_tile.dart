@@ -16,9 +16,11 @@ class TransactionTile extends StatelessWidget {
     this.compact = false,
     this.selected = false,
     this.selectionMode = false,
+    this.invoiceLabel,
   });
 
   final LedgerEntry entry;
+  final String? invoiceLabel;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final CategoryIcon categoryIcon;
@@ -165,6 +167,28 @@ class TransactionTile extends StatelessWidget {
                             heading,
                             const SizedBox(height: 3),
                             metadata,
+                            if (invoiceLabel != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.receipt_long_outlined,
+                                      size: 14,
+                                      color: colors.primary,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        invoiceLabel!,
+                                        style: metadataStyle?.copyWith(
+                                          color: colors.primary,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             if (entry.fx != null) ...[
                               const SizedBox(height: 2),
                               Text(

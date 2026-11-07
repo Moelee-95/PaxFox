@@ -41,6 +41,8 @@ class LedgerStore extends ChangeNotifier {
   Set<int> get receiptTransactionIds => _receiptTransactionIds;
   Set<int> _scannedInvoiceTransactionIds = const {};
   Set<int> get scannedInvoiceTransactionIds => _scannedInvoiceTransactionIds;
+  Map<int, ({int id, String label})> _invoiceGroups = const {};
+  Map<int, ({int id, String label})> get invoiceGroups => _invoiceGroups;
   List<LedgerCategory> _categories = const [];
   List<LedgerCategory> get categories => _categories;
   Map<CategoryKind, List<LedgerCategory>> _categoriesByKind = const {};
@@ -256,10 +258,30 @@ class LedgerStore extends ChangeNotifier {
         'receipts',
         columns: ['transaction_id'],
       )).map((r) => r['transaction_id'] as int).toSet();
-      final scannedIds = (await txn.query(
-        'scanned_invoice_entries',
-        columns: ['transaction_id'],
-      )).map((r) => r['transaction_id'] as int).toSet();
+      final batchLinks = await txn.rawQuery(
+        'SELECT e.transaction_id, e.batch_id, s.draft FROM scanned_invoice_entries e JOIN scanned_invoices s ON s.id = e.batch_id',
+      );
+      final scannedIds = batchLinks
+          .map((r) => r['transaction_id'] as int)
+          .toSet();
+      final invoiceGroups = <int, ({int id, String label})>{};
+      final batchLabels = <int, String>{};
+      for (final row in batchLinks) {
+        final batch = row['batch_id'] as int;
+        final label = batchLabels.putIfAbsent(batch, () {
+          var merchant = '';
+          try {
+            final draft = jsonDecode(row['draft'] as String);
+            if (draft is Map && draft['merchant'] is String) {
+              merchant = (draft['merchant'] as String).trim();
+            }
+          } on FormatException {
+            // Damaged source metadata must not prevent reading the ledger.
+          }
+          return 'Invoice #$batch${merchant.isEmpty ? '' : ' - $merchant'}';
+        });
+        invoiceGroups[row['transaction_id'] as int] = (id: batch, label: label);
+      }
       final rules = (await txn.query(
         'recurring_rules',
         where: 'archived = 0',
@@ -320,6 +342,7 @@ class LedgerStore extends ChangeNotifier {
         timeout: timeout,
         receiptIds: receiptIds,
         scannedIds: scannedIds,
+        invoiceGroups: invoiceGroups,
         rules: rules,
         occurrences: occurrences,
         setup: setup,
@@ -351,6 +374,7 @@ class LedgerStore extends ChangeNotifier {
     geminiManualKey = snapshot.geminiManualKey;
     _receiptTransactionIds = Set.unmodifiable(snapshot.receiptIds);
     _scannedInvoiceTransactionIds = Set.unmodifiable(snapshot.scannedIds);
+    _invoiceGroups = Map.unmodifiable(snapshot.invoiceGroups);
     _recurringRules = List.unmodifiable(snapshot.rules);
     _recurringOccurrences = List.unmodifiable(snapshot.occurrences);
     setupCompleted = snapshot.setup;
@@ -494,9 +518,17 @@ class LedgerStore extends ChangeNotifier {
     );
   }
 
-  Future<void> saveEntry(LedgerEntry entry) async {
+  Future<void> saveEntry(LedgerEntry entry, {DateTime? createdAt}) async {
     await db.transaction((txn) async {
       await _writeEntry(txn, entry);
+      if (createdAt != null && entry.id != null) {
+        await txn.update(
+          'transactions',
+          {'created_at': createdAt.toUtc().toIso8601String()},
+          where: 'id = ?',
+          whereArgs: [entry.id],
+        );
+      }
       if (entry.id != null &&
           (await txn.query(
             'scanned_invoice_entries',
@@ -1485,8 +1517,18 @@ class LedgerStore extends ChangeNotifier {
         rule.day > 31 ||
         rule.interval < 1 ||
         rule.interval > 120 ||
+        rule.month < 1 ||
+        rule.month > 12 ||
+        rule.reminderMinutes < 0 ||
+        rule.reminderMinutes > 1439 ||
+        (rule.frequency == RecurrenceFrequency.week && rule.day > 7) ||
         rule.nextDate !=
-            monthlyDate(rule.nextDate.year, rule.nextDate.month, rule.day) ||
+            firstRecurringDate(
+              rule.nextDate,
+              rule.frequency,
+              rule.day,
+              rule.month,
+            ) ||
         rule.nextDate.isBefore(current) ||
         (rule.endDate != null && rule.endDate!.isBefore(rule.nextDate))) {
       throw ArgumentError(
@@ -1569,7 +1611,9 @@ class LedgerStore extends ChangeNotifier {
         {
           'active': active ? 1 : 0,
           if (active && rule.nextDate.isBefore(now))
-            'next_date': dayKey(firstMonthlyDate(now, rule.day)),
+            'next_date': dayKey(
+              firstRecurringDate(now, rule.frequency, rule.day, rule.month),
+            ),
         },
         where: 'id = ?',
         whereArgs: [id],
@@ -1703,10 +1747,17 @@ class LedgerStore extends ChangeNotifier {
             'category': rule.category,
             'account_id': rule.accountId,
             'status': 'failed',
+            'manual': rule.automatic ? 0 : 1,
           });
-          await _postOccurrence(txn, id);
+          if (rule.automatic) await _postOccurrence(txn, id);
         }
-        final next = monthlyDate(due.year, due.month + rule.interval, rule.day);
+        final next = nextRecurringDate(
+          due,
+          rule.frequency,
+          rule.interval,
+          rule.day,
+          rule.month,
+        );
         await txn.update(
           'recurring_rules',
           {
@@ -1737,7 +1788,7 @@ class LedgerStore extends ChangeNotifier {
     await db.update(
       'recurring_occurrences',
       {'status': 'skipped', 'error': null},
-      where: "id = ? AND status = 'failed'",
+      where: "id = ? AND status = 'failed' AND manual = 0",
       whereArgs: [id],
     );
     await _refreshAfterWrite();

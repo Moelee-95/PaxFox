@@ -104,20 +104,63 @@ void main() {
         findsNothing,
       );
       expect(find.text('Liability'), findsOneWidget);
-      await tester.tap(find.byType(SwitchListTile));
+      await tester.scrollUntilVisible(
+        find.text('Liability'),
+        180,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(
+        find.byWidgetPredicate(
+          (w) =>
+              w is SwitchListTile &&
+              (w.title is Text) &&
+              ['Liability', 'Asset'].contains((w.title as Text).data),
+        ),
+      );
       await tester.pumpAndSettle();
       expect(
-        tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+        tester
+            .widget<SwitchListTile>(
+              find.byWidgetPredicate(
+                (w) =>
+                    w is SwitchListTile &&
+                    (w.title is Text) &&
+                    ['Liability', 'Asset'].contains((w.title as Text).data),
+              ),
+            )
+            .value,
         isTrue,
       );
       await chooseEntryType(tester, 'income');
       await tester.pumpAndSettle();
       expect(find.text('Asset'), findsOneWidget);
       expect(
-        tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+        tester
+            .widget<SwitchListTile>(
+              find.byWidgetPredicate(
+                (w) =>
+                    w is SwitchListTile &&
+                    (w.title is Text) &&
+                    ['Liability', 'Asset'].contains((w.title as Text).data),
+              ),
+            )
+            .value,
         isFalse,
       );
-      await tester.tap(find.byType(SwitchListTile));
+      await tester.ensureVisible(find.text('Asset'));
+      await tester.tap(
+        find.byWidgetPredicate(
+          (w) =>
+              w is SwitchListTile &&
+              (w.title is Text) &&
+              ['Liability', 'Asset'].contains((w.title as Text).data),
+        ),
+      );
+      await tester.scrollUntilVisible(
+        find.widgetWithText(TextFormField, 'Description (e.g. Rent)'),
+        -200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.enterText(
         find.widgetWithText(TextFormField, 'Description (e.g. Rent)'),
         'Salary',
@@ -201,7 +244,7 @@ void main() {
       factory: databaseFactoryFfi,
     );
     try {
-      expect(await migrated.db.getVersion(), 14);
+      expect(await migrated.db.getVersion(), 15);
       expect(migrated.recurringRules.single.description, 'Existing schedule');
       expect(migrated.recurringRules.single.isAsset, isFalse);
       expect(migrated.recurringRules.single.isLiability, isFalse);

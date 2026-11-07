@@ -498,7 +498,7 @@ void main() {
           path: path,
           factory: databaseFactoryFfi,
         );
-        expect(await migrated.db.getVersion(), 14);
+        expect(await migrated.db.getVersion(), 15);
         expect(migrated.entries.single.amount, 200);
         expect(migrated.entries.single.createdAt, timestamp);
         expect(migrated.accounts.single.id, accountId);

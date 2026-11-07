@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../domain/ledger.dart';
 
-enum TransactionCreation { manual, scan, upload }
+enum TransactionCreation { manual, scan, gallery, upload }
 
 typedef TransactionCreationRequest = ({
   EntryType type,
@@ -16,7 +16,7 @@ Future<TransactionCreationRequest?> showTransactionMenu(
   context: context,
   barrierDismissible: true,
   barrierLabel: 'Cancel adding transaction',
-  barrierColor: Colors.white.withValues(alpha: 0.9),
+  barrierColor: Colors.black.withValues(alpha: .22),
   transitionDuration: const Duration(milliseconds: 180),
   transitionBuilder: (_, animation, _, child) =>
       FadeTransition(opacity: animation, child: child),
@@ -24,26 +24,45 @@ Future<TransactionCreationRequest?> showTransactionMenu(
     type: MaterialType.transparency,
     child: LayoutBuilder(
       builder: (context, constraints) {
-        final right = (constraints.maxWidth - anchor.right).clamp(
+        final padding = MediaQuery.paddingOf(context);
+        // Keep the captured FAB anchor usable after rotation/window resizing.
+        final menuAnchor = Rect.fromLTWH(
+          anchor.left.clamp(
+            16.0,
+            (constraints.maxWidth - anchor.width - 16).clamp(
+              16.0,
+              double.infinity,
+            ),
+          ),
+          anchor.top.clamp(
+            padding.top + 16,
+            (constraints.maxHeight - padding.bottom - 96 - anchor.height).clamp(
+              padding.top + 16,
+              double.infinity,
+            ),
+          ),
+          anchor.width,
+          anchor.height,
+        );
+        final right = (constraints.maxWidth - menuAnchor.right).clamp(
           16.0,
           constraints.maxWidth - 16,
         );
-        final availableHeight =
-            (anchor.top - MediaQuery.paddingOf(context).top - 24).clamp(
-              0.0,
-              constraints.maxHeight,
-            );
+        final availableHeight = (menuAnchor.top - padding.top - 24).clamp(
+          0.0,
+          constraints.maxHeight,
+        );
         return Stack(
           children: [
             Positioned(
               left: 16,
               right: right,
-              bottom: constraints.maxHeight - anchor.top + 12,
+              bottom: constraints.maxHeight - menuAnchor.top + 12,
               child: Align(
                 alignment: Alignment.centerRight,
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
-                    maxWidth: 560,
+                    maxWidth: 380,
                     maxHeight: availableHeight,
                   ),
                   child: SingleChildScrollView(
@@ -65,7 +84,7 @@ Future<TransactionCreationRequest?> showTransactionMenu(
               ),
             ),
             Positioned.fromRect(
-              rect: anchor,
+              rect: menuAnchor,
               child: FloatingActionButton(
                 heroTag: null,
                 tooltip: 'Cancel adding transaction',
@@ -87,6 +106,7 @@ class _CreationColumn extends StatelessWidget {
   Widget build(BuildContext context) {
     final income = type == EntryType.income;
     final colors = Theme.of(context).colorScheme;
+    final showLabels = MediaQuery.textScalerOf(context).scale(14) <= 18;
     return Material(
       color: colors.surface,
       borderRadius: BorderRadius.circular(20),
@@ -112,44 +132,64 @@ class _CreationColumn extends StatelessWidget {
                 ),
               ),
             ),
-            for (final action in TransactionCreation.values)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: FilledButton.tonal(
-                  key: ValueKey('create-${type.name}-${action.name}'),
-                  onPressed: () =>
-                      Navigator.pop(context, (type: type, action: action)),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size(0, 60),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 12,
+            LayoutBuilder(
+              builder: (context, constraints) => Wrap(
+                alignment: WrapAlignment.spaceEvenly,
+                spacing: 4,
+                runSpacing: 4,
+                children: [
+                  for (final action in TransactionCreation.values)
+                    SizedBox(
+                      width: (constraints.maxWidth - 4) / 2,
+                      child: Tooltip(
+                        message:
+                            '${income ? 'Income' : 'Expense'}: ${switch (action) {
+                              TransactionCreation.manual => 'Add manually',
+                              TransactionCreation.scan => 'Scan invoice',
+                              TransactionCreation.gallery => 'Select from gallery',
+                              TransactionCreation.upload => 'Upload file',
+                            }}',
+                        child: TextButton(
+                          key: ValueKey('create-${type.name}-${action.name}'),
+                          onPressed: () => Navigator.pop(context, (
+                            type: type,
+                            action: action,
+                          )),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 8,
+                              horizontal: 2,
+                            ),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(switch (action) {
+                                TransactionCreation.manual =>
+                                  Icons.edit_note_outlined,
+                                TransactionCreation.scan =>
+                                  Icons.document_scanner_outlined,
+                                TransactionCreation.gallery =>
+                                  Icons.photo_library_outlined,
+                                TransactionCreation.upload =>
+                                  Icons.upload_file_outlined,
+                              }),
+                              if (showLabels) const SizedBox(height: 4),
+                              if (showLabels)
+                                Text(switch (action) {
+                                  TransactionCreation.manual => 'Manual',
+                                  TransactionCreation.scan => 'Scan',
+                                  TransactionCreation.gallery => 'Gallery',
+                                  TransactionCreation.upload => 'File',
+                                }, textAlign: TextAlign.center),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(switch (action) {
-                        TransactionCreation.manual => Icons.edit_note_outlined,
-                        TransactionCreation.scan =>
-                          Icons.document_scanner_outlined,
-                        TransactionCreation.upload =>
-                          Icons.upload_file_outlined,
-                      }, size: 22),
-                      const SizedBox(height: 6),
-                      Text(switch (action) {
-                        TransactionCreation.manual => 'Add manually',
-                        TransactionCreation.scan =>
-                          income ? 'Scan income' : 'Scan invoice',
-                        TransactionCreation.upload => 'Upload file',
-                      }, textAlign: TextAlign.center),
-                    ],
-                  ),
-                ),
+                ],
               ),
+            ),
           ],
         ),
       ),

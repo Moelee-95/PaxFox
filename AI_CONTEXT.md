@@ -4,7 +4,7 @@ Implementation snapshot: **2026-11-07**, source baseline **`eb4d9cf`** with loca
 
 ## What the app is
 
-Flutter/Dart Material 3 personal finance app, one setup currency (EUR/USD/GBP/IQD), local SQLite, no login or sync. Manual bookkeeping works offline. Document extraction sends selected images/PDFs and categories for the chosen expense/income mode to Gemini. Application version: `1.0.0+1`; Dart SDK constraint: `^3.13.3`; SQLite schema: **14**.
+Flutter/Dart Material 3 personal finance app, one setup currency (EUR/USD/GBP/IQD), local SQLite, no login or sync. Manual bookkeeping works offline. Document extraction sends selected images/PDFs and categories for the chosen expense/income mode to Gemini. Application version: `1.0.0+1`; Dart SDK constraint: `^3.13.3`; SQLite schema: **15**.
 
 The displayed app name is **PaxFox**, including onboarding, Home, More/About, help text, Android/iOS app labels and `paxfox_...csv` exports. The internal Dart package `moneva`, platform application IDs and `moneva.sqlite` filename remain compatible with existing installations and data. The bundled font alias is `PaxFoxRoboto`.
 
@@ -13,7 +13,7 @@ Android legacy/adaptive and iOS launcher icons use the supplied fox artwork; the
 ## Screen map
 
 ```text
-Startup -> open/migrate storage -> failure/retry OR required first-run setup
+Startup -> open/migrate storage + request notification permission -> failure/retry OR required first-run setup
 Setup: currency + cash -> banks/no-bank -> review + optional debts -> main shell
 Main bottom tabs: Home | Overview | Cashflow | More (three-dot icon; Back twice within 2 seconds to exit)
   Home: month pager + three tabs: Expenses/refunds | Income | compact info icon (Monthly overview); header amounts omit fractional units; normal tab taps and horizontal swipes; swipe left from the info tab to continue to main Overview
@@ -26,9 +26,9 @@ More: editable local user card + searchable All transactions, Categories, Accoun
   All transactions replaces content; app-bar/system Back restores More
   Management screens push routes; transaction, recurring and scanned-item editors use bottom sheets; no side drawer
   Accounts -> AccountForm (unused banks can be deleted); Categories -> full-page add/edit, 21 color swatches + searchable grouped icons (including brands), pinned Save and header check
-  Recurring -> RecurringForm bottom sheet; unpaid history -> retry/skip
+  Recurring -> daily/weekly/monthly/yearly schedules; automatic posting or manual reminders; history -> confirm/retry/skip
   CSV -> multi-select account cards and type bottom sheet; one nine-column file preserves mixed assignments and transfers; legacy five-column imports require one account/type
-Floating + stays unchanged -> white modal backdrop with Expense left / Income right; each has Add manually / Scan / Upload file; close stays at + position
+Translucent floating + -> compact Expense / Income columns, each with Manual / Scan / Gallery / File icon buttons; close stays at + position
   Manual -> TransactionForm bottom sheet with colored category/type and amount header, preselected type and pinned Save
   Scan/upload -> camera, images or PDF -> preparation -> Extract -> expense/income review
   Review -> item edit bottom sheets -> atomic save -> matching Home expense/income tab
@@ -100,6 +100,8 @@ Monthly savings validation on 2026-11-01: **216 tests passed** with `CAPTURE_UI=
 Six-month chart revision on 2026-11-01: all six months remain visible at narrow widths and large text, with permanent compact amount labels on every bar, including zero/negative values. Exact currency values remain available in the selected summary/tooltips. Six focused chart/navigation tests pass; analyzer and release build pass. Light/dark narrow previews inspected. The updated APK has not been installed because no Android device was connected at completion.
 
 Foreign bank accounts (2026-11-07): schema **14** adds account reporting currency/manual rate, native transaction movements, immutable original FX snapshots and recurring input currency. Bank editor converts current balance on currency changes and supports correction; app-currency reports stay frozen when rates change. Manual entries default to app currency, account selections in recurring default to native currency, and cross-currency transfers require actual deducted/received amounts and show their derived rate. Existing native movements are converted atomically on account currency changes; ordinary rate edits never rewrite transactions. Migration/reopen, exact rounding, history preservation, funds/blocked rules, recurring retries, CSV metadata and editor flows are covered by **22 new FX tests**. Full suite: **243 pass**, with the previously observed unrelated category-list large-text ListTile failure in `bottom_sheets_test.dart`. Analyzer and normal Android release APK build pass. Invoice review still uses app-currency item amounts and converts the bank effect. Restart the full Flutter run to open/migrate the database; do not rely on hot reload into an already open schema-13 store.
+
+Current UI/recurring update (2026-11-07): schema **15** preserves old schedules as automatic monthly rules and adds daily/weekly/yearly intervals, manual mode, reminder time and stable notification IDs. Confirmation posts on the confirmation date; each overdue occurrence remains separate and repeated confirmation cannot charge twice. Phone-local reminders use a rolling 60-request future window refreshed on resume. Android/iOS can allow dismissal; pending occurrences remain in Recurring. Saved entries select their month; creation menu restores Gallery; Added on is editable beneath Date; shared invoice labels identify linked rows. Native plugin changes require stopping the Flutter run and running `lib/main.dart` again. Physical reminder delivery and iOS builds still need verification. Validation: **254 passing tests**, with the previously observed large-text category-picker failure in `bottom_sheets_test.dart`; new schedule/reminder/editor/menu tests pass, analyzer is clean and Android release builds pass. Light/dark and 320px large-text menu previews inspected.
 
 Camera and live Gemini remain unverified. iOS and production signing/publishing were not verified; release currently uses the existing debug signing key. Support actions remain deferred. No full backup/restore, web support, bank integration or cloud sync exists.
 

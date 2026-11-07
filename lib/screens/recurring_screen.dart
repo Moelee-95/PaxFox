@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/presentation/busy_label.dart';
 
 import '../core/data/ledger_store.dart';
+import '../core/data/recurring_notifications.dart';
 import '../core/domain/ledger.dart';
 import '../core/domain/recurring.dart';
 import '../core/presentation/async_action.dart';
@@ -15,11 +16,11 @@ import '../core/presentation/ledger_refresh.dart';
 import '../core/presentation/responsive_pair.dart';
 
 const _recurringInfo =
-    'Monthly expenses and income are posted automatically when you open or resume PaxFox. Missed due dates are caught up. No bank connection: this updates your local ledger, not your real bank. Days 29-31 use the last day in shorter months. No weekend adjustment.';
+    'Automatic recurring entries are posted when you open or resume PaxFox. Manual entries wait for confirmation and can show reminders at your chosen local time. Missed due dates are kept separately. No bank connection: this updates your local ledger, not your real bank. Days 29-31 use the last day in shorter months. No weekend adjustment.';
 const _recurringHistoryInfo =
     'Unpaid occurrences keep their original amount and account. Retry books the payment on today\'s date and preserves its scheduled due date in this history. Editing a rule affects future occurrences only. If a posted payment is edited or deleted in Transactions, it is never automatically recreated.';
 const _recurringFormInfo =
-    'Expenses and income repeat monthly in the chosen app or account currency. Future changes do not alter already posted payments or unpaid bills. Choose a start date today or later; past transactions do not create recurring rules.';
+    'Expenses and income can repeat daily, weekly, monthly or yearly in the chosen app or account currency. Future changes do not alter already posted payments or unpaid bills. Choose a start date today or later; past transactions do not create recurring rules.';
 
 class RecurringScreen extends StatefulWidget {
   const RecurringScreen({super.key, required this.store});
@@ -139,7 +140,7 @@ class _RecurringScreenState extends State<RecurringScreen> {
                             '${rule.type == EntryType.income ? 'Income' : 'Expense'} - ${(rule.currency ?? widget.store.currency).display(rule.amount)} - ${widget.store.accounts.where((a) => a.id == rule.accountId).firstOrNull?.name ?? 'Account unavailable'}',
                           ),
                           Text(
-                            '${rule.active ? 'Next' : 'Paused; scheduled'}: ${dayKey(rule.nextDate)} - every ${rule.interval} month(s), day ${rule.day}',
+                            '${rule.active ? 'Next' : 'Paused; scheduled'}: ${dayKey(rule.nextDate)} - ${rule.scheduleLabel}${rule.automatic ? ' - automatic' : ' - confirm manually'}',
                             style: TextStyle(
                               color: rule.active ? Colors.blue : Colors.orange,
                             ),
@@ -194,7 +195,11 @@ class _RecurringScreenState extends State<RecurringScreen> {
                         '${occurrence.description} - ${(occurrence.currency ?? widget.store.currency).display(occurrence.amount)}',
                       ),
                       subtitle: Text(
-                        '${occurrence.type.name} - ${dayKey(occurrence.date)} - ${occurrence.status == 'posted' && occurrence.transactionId == null ? 'Posted, then deleted manually' : occurrence.status}${occurrence.error == null ? '' : '\n${occurrence.error}'}',
+                        '${occurrence.type.name} - ${dayKey(occurrence.date)} - ${occurrence.status == 'posted' && occurrence.transactionId == null
+                            ? 'Posted, then deleted manually'
+                            : occurrence.manual && occurrence.status == 'failed'
+                            ? 'Awaiting confirmation'
+                            : occurrence.status}${occurrence.error == null ? '' : '\n${occurrence.error}'}',
                       ),
                     ),
                     if (occurrence.status == 'failed')
@@ -211,45 +216,54 @@ class _RecurringScreenState extends State<RecurringScreen> {
                                         occurrence.id,
                                       ),
                                     ),
-                              child: const Text('Retry posting'),
+                              child: Text(
+                                occurrence.manual
+                                    ? 'Confirm payment'
+                                    : 'Retry posting',
+                              ),
                             ),
-                            TextButton(
-                              onPressed: busy
-                                  ? null
-                                  : () async {
-                                      final yes = await showDialog<bool>(
-                                        context: context,
-                                        builder: (context) => AlertDialog(
-                                          title: const Text(
-                                            'Skip this unpaid payment?',
-                                          ),
-                                          content: const Text(
-                                            'No transaction will be posted. Future scheduled payments are unchanged.',
-                                          ),
-                                          actions: [
-                                            TextButton(
-                                              onPressed: () =>
-                                                  Navigator.pop(context, false),
-                                              child: const Text('Cancel'),
+                            if (!occurrence.manual)
+                              TextButton(
+                                onPressed: busy
+                                    ? null
+                                    : () async {
+                                        final yes = await showDialog<bool>(
+                                          context: context,
+                                          builder: (context) => AlertDialog(
+                                            title: const Text(
+                                              'Skip this unpaid payment?',
                                             ),
-                                            FilledButton(
-                                              onPressed: () =>
-                                                  Navigator.pop(context, true),
-                                              child: const Text('Skip'),
+                                            content: const Text(
+                                              'No transaction will be posted. Future scheduled payments are unchanged.',
                                             ),
-                                          ],
-                                        ),
-                                      );
-                                      if (yes == true) {
-                                        await action(
-                                          () => widget.store.skipRecurring(
-                                            occurrence.id,
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () => Navigator.pop(
+                                                  context,
+                                                  false,
+                                                ),
+                                                child: const Text('Cancel'),
+                                              ),
+                                              FilledButton(
+                                                onPressed: () => Navigator.pop(
+                                                  context,
+                                                  true,
+                                                ),
+                                                child: const Text('Skip'),
+                                              ),
+                                            ],
                                           ),
                                         );
-                                      }
-                                    },
-                              child: const Text('Skip'),
-                            ),
+                                        if (yes == true) {
+                                          await action(
+                                            () => widget.store.skipRecurring(
+                                              occurrence.id,
+                                            ),
+                                          );
+                                        }
+                                      },
+                                child: const Text('Skip'),
+                              ),
                           ],
                         ),
                       ),
@@ -279,6 +293,10 @@ class _RecurringFormState extends State<RecurringForm> {
   late Currency inputCurrency;
   String? category;
   late int day;
+  late RecurrenceFrequency frequency;
+  late int yearlyMonth;
+  late bool automatic;
+  late TimeOfDay reminderTime;
   late DateTime start;
   DateTime? end;
   late final action = AsyncAction()..addListener(() => setState(() {}));
@@ -302,6 +320,11 @@ class _RecurringFormState extends State<RecurringForm> {
     category = rule?.category;
     start = rule?.nextDate ?? dateOnly(DateTime.now());
     day = rule?.day ?? start.day;
+    frequency = rule?.frequency ?? RecurrenceFrequency.month;
+    yearlyMonth = rule?.month ?? start.month;
+    automatic = rule?.automatic ?? true;
+    final minutes = rule?.reminderMinutes ?? 540;
+    reminderTime = TimeOfDay(hour: minutes ~/ 60, minute: minutes % 60);
     end = rule?.endDate;
   }
 
@@ -318,8 +341,35 @@ class _RecurringFormState extends State<RecurringForm> {
     if (!form.currentState!.validate()) {
       return;
     }
-    final saved = await action.run(
-      () async => widget.store.saveRecurring(
+    final saved = await action.run(() async {
+      if (!automatic && RecurringNotifications.instance != null) {
+        try {
+          final enabled = await RecurringNotifications.instance!
+              .requestPermissions();
+          if (!mounted) return;
+          if (!enabled) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Notifications are disabled. The payment will still wait for confirmation in Recurring.',
+                ),
+              ),
+            );
+          }
+        } catch (_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Could not enable notifications. Confirm pending payments in Recurring.',
+                ),
+              ),
+            );
+          }
+        }
+      }
+      if (!mounted) return;
+      await widget.store.saveRecurring(
         RecurringRule(
           id: widget.rule?.id,
           type: type,
@@ -332,13 +382,16 @@ class _RecurringFormState extends State<RecurringForm> {
           accountId: accountId!,
           day: day,
           interval: int.parse(interval.text),
-          nextDate: firstMonthlyDate(start, day),
+          nextDate: firstRecurringDate(start, frequency, day, yearlyMonth),
+          frequency: frequency,
+          month: yearlyMonth,
+          automatic: automatic,
+          reminderMinutes: reminderTime.hour * 60 + reminderTime.minute,
           endDate: end,
           active: widget.rule?.active ?? true,
         ),
-      ),
-      failureMessage: 'Could not save recurring payment. Please retry.',
-    );
+      );
+    }, failureMessage: 'Could not save recurring payment. Please retry.');
     if (saved && mounted) Navigator.pop(context);
   }
 
@@ -495,34 +548,136 @@ class _RecurringFormState extends State<RecurringForm> {
           ),
           const SizedBox(height: 16),
         ],
+        DropdownButtonFormField<RecurrenceFrequency>(
+          initialValue: frequency,
+          decoration: const InputDecoration(labelText: 'Repeat every'),
+          items: RecurrenceFrequency.values
+              .map(
+                (f) => DropdownMenuItem(
+                  value: f,
+                  child: Text(switch (f) {
+                    RecurrenceFrequency.day => 'Day',
+                    RecurrenceFrequency.week => 'Week',
+                    RecurrenceFrequency.month => 'Month',
+                    RecurrenceFrequency.year => 'Year',
+                  }),
+                ),
+              )
+              .toList(),
+          onChanged: busy
+              ? null
+              : (value) => setState(() {
+                  frequency = value!;
+                  day = frequency == RecurrenceFrequency.week
+                      ? start.weekday
+                      : start.day;
+                }),
+        ),
+        const SizedBox(height: 16),
         ResponsivePair(
-          left: DropdownButtonFormField<int>(
-            initialValue: day,
-            decoration: const InputDecoration(labelText: 'Day of month'),
-            items: List.generate(
-              31,
-              (i) => DropdownMenuItem(value: i + 1, child: Text('${i + 1}')),
-            ),
-            onChanged: busy ? null : (value) => setState(() => day = value!),
-          ),
+          left: frequency == RecurrenceFrequency.day
+              ? const Text('Every selected number of days')
+              : DropdownButtonFormField<int>(
+                  key: ValueKey(('schedule-day', frequency, day)),
+                  initialValue: day,
+                  decoration: InputDecoration(
+                    labelText: frequency == RecurrenceFrequency.week
+                        ? 'Day of week'
+                        : 'Day of month',
+                  ),
+                  items: List.generate(
+                    frequency == RecurrenceFrequency.week ? 7 : 31,
+                    (i) => DropdownMenuItem(
+                      value: i + 1,
+                      child: Text(
+                        frequency == RecurrenceFrequency.week
+                            ? const [
+                                'Monday',
+                                'Tuesday',
+                                'Wednesday',
+                                'Thursday',
+                                'Friday',
+                                'Saturday',
+                                'Sunday',
+                              ][i]
+                            : '${i + 1}',
+                      ),
+                    ),
+                  ),
+                  onChanged: busy
+                      ? null
+                      : (value) => setState(() => day = value!),
+                ),
           right: TextFormField(
             controller: interval,
             enabled: !busy,
-            decoration: const InputDecoration(labelText: 'Every N months'),
+            decoration: InputDecoration(
+              labelText: 'Every N ${frequency.name}s',
+            ),
             keyboardType: TextInputType.number,
             validator: (s) {
               final n = int.tryParse(s ?? '');
-              return n == null || n < 1 || n > 120
-                  ? 'Use 1 to 120 months.'
-                  : null;
+              return n == null || n < 1 || n > 120 ? 'Use 1 to 120.' : null;
             },
           ),
         ),
+        if (frequency == RecurrenceFrequency.year)
+          DropdownButtonFormField<int>(
+            initialValue: yearlyMonth,
+            decoration: const InputDecoration(labelText: 'Month of year'),
+            items: List.generate(
+              12,
+              (i) => DropdownMenuItem(
+                value: i + 1,
+                child: Text(
+                  MaterialLocalizations.of(context)
+                      .formatMonthYear(DateTime(2000, i + 1))
+                      .replaceAll('2000', '')
+                      .trim(),
+                ),
+              ),
+            ),
+            onChanged: busy
+                ? null
+                : (value) => setState(() => yearlyMonth = value!),
+          ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Post automatically'),
+          subtitle: Text(
+            automatic
+                ? 'Book due payments without confirmation'
+                : 'Keep pending until you confirm payment',
+          ),
+          value: automatic,
+          onChanged: busy ? null : (value) => setState(() => automatic = value),
+        ),
+        if (!automatic)
+          const Text(
+            'Your phone may allow notification dismissal. Payments remain pending here until confirmed. Open PaxFox regularly to refresh reminders.',
+          ),
+        if (!automatic)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text('Reminder time: ${reminderTime.format(context)}'),
+            trailing: const Icon(Icons.notifications_outlined),
+            onTap: busy
+                ? null
+                : () async {
+                    final selected = await showTimePicker(
+                      context: context,
+                      initialTime: reminderTime,
+                    );
+                    if (selected != null && mounted) {
+                      setState(() => reminderTime = selected);
+                    }
+                  },
+          ),
         ListTile(
           contentPadding: EdgeInsets.zero,
           title: Text('Start on or after: ${dayKey(start)}'),
           subtitle: Text(
-            'First scheduled payment: ${dayKey(firstMonthlyDate(start, day))}',
+            'First scheduled payment: ${dayKey(firstRecurringDate(start, frequency, day, yearlyMonth))}',
           ),
           trailing: const Icon(Icons.calendar_today),
           onTap: busy

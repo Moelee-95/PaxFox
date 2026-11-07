@@ -106,7 +106,10 @@ void main() {
       await tester.pumpAndSettle();
       final amount = find.widgetWithText(TextFormField, 'Amount (€)');
       final category = find.byKey(const ValueKey('category-picker'));
-      expect(tester.getTopLeft(category).dy, lessThan(tester.getTopLeft(amount).dy));
+      expect(
+        tester.getTopLeft(category).dy,
+        lessThan(tester.getTopLeft(amount).dy),
+      );
       final day = find.widgetWithText(
         DropdownButtonFormField<int>,
         'Day of month',
@@ -114,7 +117,16 @@ void main() {
       final interval = find.widgetWithText(TextFormField, 'Every N months');
       expect(tester.getTopLeft(day).dy, tester.getTopLeft(interval).dy);
       final end = find.widgetWithText(ListTile, 'End date: none');
-      final flag = find.byType(SwitchListTile);
+      final scrollable = find
+          .descendant(
+            of: find.byType(ListView),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      final position = tester.state<ScrollableState>(scrollable).position;
+      position.jumpTo(position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      final flag = find.widgetWithText(SwitchListTile, 'Liability');
       expect(tester.getTopLeft(end).dy, tester.getTopLeft(flag).dy);
       expect(
         tester.getBottomRight(find.text('Save recurring payment')).dy,
