@@ -22,6 +22,20 @@ const _recurringHistoryInfo =
 const _recurringFormInfo =
     'Expenses and income can repeat daily, weekly, monthly or yearly in the chosen app or account currency. Future changes do not alter already posted payments or unpaid bills. Choose a start date today or later; past transactions do not create recurring rules.';
 
+String _historyStatus(RecurringOccurrence occurrence) {
+  if (occurrence.status == 'posted' && occurrence.transactionId == null) {
+    return 'Posted, then deleted manually';
+  }
+  if (occurrence.status == 'skipped' &&
+      occurrence.error?.startsWith('Moved to') == true) {
+    return occurrence.error!;
+  }
+  final status = occurrence.manual && occurrence.status == 'failed'
+      ? 'Awaiting confirmation'
+      : occurrence.status;
+  return '$status${occurrence.error == null ? '' : '\n${occurrence.error}'}';
+}
+
 class RecurringScreen extends StatefulWidget {
   const RecurringScreen({super.key, required this.store});
   final LedgerStore store;
@@ -195,11 +209,7 @@ class _RecurringScreenState extends State<RecurringScreen> {
                         '${occurrence.description} - ${(occurrence.currency ?? widget.store.currency).display(occurrence.amount)}',
                       ),
                       subtitle: Text(
-                        '${occurrence.type.name} - ${dayKey(occurrence.date)} - ${occurrence.status == 'posted' && occurrence.transactionId == null
-                            ? 'Posted, then deleted manually'
-                            : occurrence.manual && occurrence.status == 'failed'
-                            ? 'Awaiting confirmation'
-                            : occurrence.status}${occurrence.error == null ? '' : '\n${occurrence.error}'}',
+                        '${occurrence.type.name} - ${dayKey(occurrence.date)} - ${_historyStatus(occurrence)}',
                       ),
                     ),
                     if (occurrence.status == 'failed')
@@ -342,7 +352,9 @@ class _RecurringFormState extends State<RecurringForm> {
       return;
     }
     final saved = await action.run(() async {
-      if (!automatic && RecurringNotifications.instance != null) {
+      if (!automatic &&
+          widget.store.notificationsEnabled &&
+          RecurringNotifications.instance != null) {
         try {
           final enabled = await RecurringNotifications.instance!
               .requestPermissions();

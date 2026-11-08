@@ -129,6 +129,7 @@ class LedgerCategory {
     this.icon = CategoryIcon.general,
     this.color,
   });
+  bool get isSystemDebt => name.toLowerCase() == 'debt';
   final int id;
   final String name;
   final CategoryKind kind;

@@ -7,6 +7,7 @@ import '../core/domain/ledger_queries.dart';
 import '../core/presentation/month_selector.dart';
 import '../core/presentation/retained_page.dart';
 import 'monthly_overview.dart';
+import '../core/presentation/outlined_tabs.dart';
 import '../core/presentation/transaction_list.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -21,6 +22,7 @@ class HomeScreen extends StatefulWidget {
     required this.onTabChanged,
     required this.onMonthChanged,
     required this.tileBuilder,
+    this.invoiceGroups = const {},
     this.selectedCategory,
     required this.onCategoryChanged,
     this.onOverviewDragStart,
@@ -43,6 +45,7 @@ class HomeScreen extends StatefulWidget {
   final ValueChanged<int> onTabChanged;
   final ValueChanged<DateTime> onMonthChanged;
   final Widget Function(LedgerEntry) tileBuilder;
+  final Map<int, InvoiceGroupInfo> invoiceGroups;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -156,109 +159,92 @@ class _HomeScreenState extends State<HomeScreen>
               sliver: SliverTransactionList(
                 entries: entries,
                 tileBuilder: widget.tileBuilder,
+                invoiceGroups: widget.invoiceGroups,
                 emptyMessage: empty,
               ),
             ),
           ],
         );
-    final theme = Theme.of(context);
     final tabHeight = 48 * MediaQuery.textScalerOf(context).scale(1);
     return Column(
       children: [
         MonthSelector(month: widget.month, onChanged: widget.onMonthChanged),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHigh,
-              borderRadius: BorderRadius.circular(24),
-            ),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                const infoWidth = 48.0;
-                final moneyTabWidth =
-                    (constraints.maxWidth - 8 - infoWidth) / 2;
-                return TabBar(
-                  controller: _tabs,
-                  isScrollable: true,
-                  tabAlignment: TabAlignment.start,
-                  physics: const NeverScrollableScrollPhysics(),
-                  padding: const EdgeInsets.all(4),
-                  labelPadding: EdgeInsets.zero,
-                  dividerColor: Colors.transparent,
-                  indicatorSize: TabBarIndicatorSize.tab,
-                  indicator: BoxDecoration(
-                    color: theme.colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  labelColor: theme.colorScheme.onSurface,
-                  unselectedLabelColor: theme.colorScheme.onSurfaceVariant,
-                  splashBorderRadius: BorderRadius.circular(20),
-                  tabs: [
-                    for (final tab in [
-                      (
-                        label: 'Expenses',
-                        amount: totals.spending,
-                        color: theme.brightness == Brightness.dark
-                            ? Colors.red.shade300
-                            : Colors.red.shade700,
-                      ),
-                      (
-                        label: 'Income',
-                        amount: totals.income,
-                        color: theme.brightness == Brightness.dark
-                            ? Colors.green.shade400
-                            : Colors.green.shade700,
-                      ),
-                    ])
-                      SizedBox(
-                        width: moneyTabWidth,
-                        child: Tab(
-                          height: tabHeight,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 6),
-                            child: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    tab.label,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                    ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              const infoWidth = 48.0;
+              final moneyTabWidth = (constraints.maxWidth - 8 - infoWidth) / 2;
+              return OutlinedTabs(
+                controller: _tabs,
+                colors: const [
+                  OutlinedTabs.expense,
+                  OutlinedTabs.income,
+                  OutlinedTabs.overview,
+                ],
+                isScrollable: true,
+                padding: const EdgeInsets.all(4),
+                labelPadding: EdgeInsets.zero,
+                tabs: [
+                  for (final tab in [
+                    (
+                      label: 'Expenses',
+                      amount: totals.spending,
+                      color: OutlinedTabs.expense,
+                    ),
+                    (
+                      label: 'Income',
+                      amount: totals.income,
+                      color: OutlinedTabs.income,
+                    ),
+                  ])
+                    SizedBox(
+                      width: moneyTabWidth,
+                      child: Tab(
+                        height: tabHeight,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  tab.label,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
                                   ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    '${widget.currency.symbol}${formatInteger(tab.amount ~/ widget.currency.scale)}',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      color: tab.color,
-                                    ),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  '${widget.currency.symbol}${formatInteger(tab.amount ~/ widget.currency.scale)}',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    color: tab.color,
                                   ),
-                                ],
-                              ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
                       ),
-                    SizedBox(
-                      width: infoWidth,
-                      child: Tab(
-                        height: tabHeight,
-                        child: const Tooltip(
-                          message: 'Monthly overview',
-                          child: Icon(
-                            Icons.info_outline,
-                            semanticLabel: 'Monthly overview',
-                          ),
+                    ),
+                  SizedBox(
+                    width: infoWidth,
+                    child: Tab(
+                      height: tabHeight,
+                      child: const Tooltip(
+                        message: 'Monthly overview',
+                        child: Icon(
+                          Icons.info_outline,
+                          semanticLabel: 'Monthly overview',
                         ),
                       ),
                     ),
-                  ],
-                );
-              },
-            ),
+                  ),
+                ],
+              );
+            },
           ),
         ),
         Expanded(
@@ -294,6 +280,7 @@ class _HomeScreenState extends State<HomeScreen>
                     selectedCategory: widget.selectedCategory,
                     onCategoryChanged: widget.onCategoryChanged,
                     tileBuilder: widget.tileBuilder,
+                    invoiceGroups: widget.invoiceGroups,
                   ),
                 ),
               ],

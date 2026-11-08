@@ -13,6 +13,7 @@ class MonthlyOverview extends StatelessWidget {
     required this.categoryIcon,
     this.categoryColor,
     required this.tileBuilder,
+    this.invoiceGroups = const {},
     required this.onCategoryChanged,
     this.selectedCategory,
   });
@@ -22,6 +23,7 @@ class MonthlyOverview extends StatelessWidget {
   final Color? Function(String)? categoryColor;
 
   final Widget Function(LedgerEntry) tileBuilder;
+  final Map<int, InvoiceGroupInfo> invoiceGroups;
   final ValueChanged<String?> onCategoryChanged;
   final String? selectedCategory;
 
@@ -126,6 +128,7 @@ class MonthlyOverview extends StatelessWidget {
             sliver: SliverTransactionList(
               entries: summary.spendingForCategory(currency, selectedCategory!),
               tileBuilder: tileBuilder,
+              invoiceGroups: invoiceGroups,
               emptyMessage: 'No transactions in this category for this month.',
             ),
           ),

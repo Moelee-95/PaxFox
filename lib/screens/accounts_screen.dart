@@ -1,3 +1,5 @@
+import 'currency_exchange_screen.dart';
+
 import 'package:flutter/material.dart';
 
 import '../core/presentation/busy_label.dart';
@@ -7,6 +9,9 @@ import '../core/domain/ledger.dart';
 import '../core/presentation/async_action.dart';
 import '../core/presentation/confirmation_dialog.dart';
 import '../core/presentation/debt_editor.dart';
+import '../core/presentation/debt_balance_card.dart';
+import '../core/presentation/app_sheet.dart';
+import 'debt_settlement_form.dart';
 import '../core/presentation/grouped_amount_formatter.dart';
 import '../core/presentation/info_button.dart';
 import '../core/presentation/ledger_refresh.dart';
@@ -20,12 +25,18 @@ class AccountsScreen extends StatelessWidget {
       builder: (_) => AccountForm(store: store, account: account),
     ),
   );
-  Future<void> editDebt(BuildContext context, [Debt? debt]) => showDialog<void>(
+  Future<void> editDebt(
+    BuildContext context, [
+    Debt? debt,
+    bool receivable = false,
+  ]) => showDialog<void>(
     context: context,
     barrierDismissible: true,
     builder: (_) => DebtEditor(
       currency: store.currency,
       debt: debt,
+      lockIdentity: store.debtPaymentLinks.containsValue(debt?.id),
+      initialIsReceivable: receivable,
       onSave: store.saveDebt,
       onDelete: debt == null ? null : () => store.deleteDebt(debt.id!),
     ),
@@ -121,26 +132,64 @@ class AccountsScreen extends StatelessWidget {
               icon: const Icon(Icons.add),
               label: const Text('Add account'),
             ),
+            const SizedBox(height: 12),
+            Text('Net wealth: ${store.currency.display(store.netWealth)}'),
+            if (store.hasUnvaluedDebts)
+              const Text(
+                'Totals exclude balances missing an exchange rate. Set a default in Settings.',
+              ),
             const SizedBox(height: 24),
-            Text('Debts', style: Theme.of(context).textTheme.titleLarge),
-            Text(
-              'Outstanding: ${store.currency.display(store.totalDebt)} · Net wealth: ${store.currency.display(store.netWealth)}',
-            ),
-            for (final debt in store.debts)
-              Card(
-                child: ListTile(
-                  leading: const Icon(Icons.account_balance_outlined),
-                  title: Text(debt.name),
-                  subtitle: const Text('Outstanding liability'),
-                  trailing: Text(store.currency.display(debt.amount)),
-                  onTap: () => editDebt(context, debt),
+            for (final receivable in [false, true]) ...[
+              if (receivable) const SizedBox(height: 24),
+              Text(
+                receivable ? 'Money owed to you' : 'Debts',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              Text(
+                store.currency.display(
+                  receivable ? store.totalReceivable : store.totalDebt,
                 ),
               ),
-            OutlinedButton.icon(
-              onPressed: () => editDebt(context),
-              icon: const Icon(Icons.add),
-              label: const Text('Add debt'),
-            ),
+              if (!store.debts.any((d) => d.isReceivable == receivable))
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text(
+                    receivable
+                        ? 'No money owed to you.'
+                        : 'No outstanding debts.',
+                  ),
+                ),
+              for (final debt in store.debts.where(
+                (d) => d.isReceivable == receivable,
+              ))
+                DebtBalanceCard(
+                  debt: debt,
+                  mainCurrency: store.currency,
+                  mainAmount: store.debtMainAmount(debt),
+                  onMissingRate: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => CurrencyExchangeScreen(
+                        store: store,
+                        initialFrom: debt.currency,
+                        initialTo: store.currency,
+                      ),
+                    ),
+                  ),
+                  onEdit: () => editDebt(context, debt),
+                  onSettle: () => showAppSheet<bool>(
+                    context,
+                    editor: true,
+                    builder: (_) =>
+                        DebtSettlementForm(store: store, debt: debt),
+                  ),
+                ),
+              OutlinedButton.icon(
+                onPressed: () => editDebt(context, null, receivable),
+                icon: const Icon(Icons.add),
+                label: Text(receivable ? 'Add receivable' : 'Add debt'),
+              ),
+            ],
           ],
         ),
       ),

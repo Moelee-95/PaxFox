@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../data/recurring_notifications.dart';
+
 import 'busy_label.dart';
 
 import '../domain/ledger.dart';
@@ -15,7 +17,10 @@ class DebtEditor extends StatefulWidget {
     required this.onSave,
     this.debt,
     this.onDelete,
+    this.initialIsReceivable = false,
+    this.lockIdentity = false,
   });
+  final bool initialIsReceivable, lockIdentity;
   final Currency currency;
   final Debt? debt;
   final Future<void> Function(Debt) onSave;
@@ -28,12 +33,17 @@ class DebtEditor extends StatefulWidget {
 class _DebtEditorState extends State<DebtEditor> {
   final form = GlobalKey<FormState>();
   late final name = TextEditingController(text: widget.debt?.name ?? '');
+  late Currency selectedCurrency = widget.debt?.currency ?? widget.currency;
   late final amount = TextEditingController(
     text: widget.debt == null
         ? ''
-        : widget.currency.formatGrouped(widget.debt!.amount),
+        : selectedCurrency.formatGrouped(widget.debt!.amount),
   );
   late final action = AsyncAction()..addListener(() => setState(() {}));
+  late bool isReceivable =
+      widget.debt?.isReceivable ?? widget.initialIsReceivable;
+  late DateTime? deadline = widget.debt?.deadline;
+  late bool deadlineEnabled = deadline != null;
   bool get busy => action.busy;
   String? get error => action.error;
 
@@ -53,16 +63,52 @@ class _DebtEditorState extends State<DebtEditor> {
     if (saved && mounted) Navigator.pop(context);
   }
 
+  Future<void> save() async {
+    if (!form.currentState!.validate()) return;
+    await run(() async {
+      if (deadlineEnabled && deadline != widget.debt?.deadline) {
+        final reminders = RecurringNotifications.instance;
+        if (reminders != null && reminders.store.notificationsEnabled) {
+          try {
+            await reminders.requestPermissions();
+          } catch (_) {
+            /* Saving remains available when permission is unavailable. */
+          }
+        }
+      }
+      await widget.onSave(
+        Debt(
+          id: widget.debt?.id,
+          name: name.text.trim(),
+          amount: selectedCurrency.parseInput(amount.text),
+          currency: selectedCurrency,
+          isReceivable: isReceivable,
+          deadline: deadlineEnabled ? deadline : null,
+          deadlineAcknowledged:
+              deadlineEnabled && deadline == widget.debt?.deadline
+              ? widget.debt?.deadlineAcknowledged
+              : null,
+        ),
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: !busy,
     child: AlertDialog(
       title: Row(
         children: [
-          Expanded(child: Text(widget.debt == null ? 'Add debt' : 'Edit debt')),
+          Expanded(
+            child: Text(
+              isReceivable
+                  ? (widget.debt == null ? 'Add receivable' : 'Edit receivable')
+                  : (widget.debt == null ? 'Add debt' : 'Edit debt'),
+            ),
+          ),
           InfoButton(
             title: 'About debts',
-            message: 'Enter what you still owe to a person or bank. Debts reduce account wealth. Update the remaining amount after repayments; record the payment separately in your account.',
+            message: 'Enter what you still owe to a person or bank, or choose money owed to you. Use Pay debt or Receive payment in Overview to record a partial or full settlement and update the remaining balance together.',
           ),
         ],
       ),
@@ -75,11 +121,41 @@ class _DebtEditorState extends State<DebtEditor> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                DropdownButtonFormField<bool>(
+                  initialValue: isReceivable,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Debt direction',
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: false, child: Text('I owe')),
+                    DropdownMenuItem(value: true, child: Text('Owed to me')),
+                  ],
+                  onChanged: busy || widget.lockIdentity
+                      ? null
+                      : (value) => setState(() => isReceivable = value!),
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<Currency>(
+                  initialValue: selectedCurrency,
+                  decoration: const InputDecoration(labelText: 'Currency'),
+                  items: [
+                    for (final c in Currency.values)
+                      DropdownMenuItem(value: c, child: Text(c.code)),
+                  ],
+                  onChanged: busy || widget.lockIdentity
+                      ? null
+                      : (value) => setState(() {
+                          selectedCurrency = value!;
+                          amount.clear();
+                        }),
+                ),
+                const SizedBox(height: 16),
                 TextFormField(
                   controller: name,
                   enabled: !busy,
                   decoration: const InputDecoration(
-                    labelText: 'Lender / debt name',
+                    labelText: 'Person / debt name',
                   ),
                   validator: (value) => value == null || value.trim().isEmpty
                       ? 'Enter a lender.'
@@ -91,20 +167,75 @@ class _DebtEditorState extends State<DebtEditor> {
                   inputFormatters: const [GroupedAmountFormatter()],
                   enabled: !busy,
                   decoration: InputDecoration(
-                    labelText: 'Outstanding amount (${widget.currency.code})',
+                    labelText: 'Outstanding amount (${selectedCurrency.code})',
                   ),
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
                   validator: (value) {
                     try {
-                      widget.currency.parseInput(value ?? '');
+                      selectedCurrency.parseInput(value ?? '');
                     } on FormatException catch (e) {
                       return e.message;
                     }
                     return null;
                   },
                 ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Set a deadline'),
+                  value: deadlineEnabled,
+                  onChanged: busy
+                      ? null
+                      : (value) => setState(() {
+                          deadlineEnabled = value;
+                          if (value && deadline == null) {
+                            final now = DateTime.now();
+                            deadline = DateTime(
+                              now.year,
+                              now.month,
+                              now.day + 1,
+                              9,
+                            );
+                          }
+                        }),
+                ),
+                if (deadlineEnabled)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.event_outlined),
+                    title: Text(dayKey(deadline!)),
+                    subtitle: Text(
+                      TimeOfDay.fromDateTime(deadline!).format(context),
+                    ),
+                    trailing: const Icon(Icons.edit_outlined),
+                    onTap: busy
+                        ? null
+                        : () async {
+                            final d = await showDatePicker(
+                              context: context,
+                              initialDate: dateOnly(deadline!),
+                              firstDate: DateTime(1900),
+                              lastDate: DateTime(2200),
+                            );
+                            if (d == null || !context.mounted) return;
+                            final time = await showTimePicker(
+                              context: context,
+                              initialTime: TimeOfDay.fromDateTime(deadline!),
+                            );
+                            if (time != null && mounted) {
+                              setState(
+                                () => deadline = DateTime(
+                                  d.year,
+                                  d.month,
+                                  d.day,
+                                  time.hour,
+                                  time.minute,
+                                ),
+                              );
+                            }
+                          },
+                  ),
                 if (error != null)
                   Text(
                     error!,
@@ -129,46 +260,30 @@ class _DebtEditorState extends State<DebtEditor> {
                       : () async {
                           final yes = await confirmAction(
                             context,
-                            title: 'Delete debt?',
-                            message: 'This removes the outstanding liability and increases net wealth. It does not record a repayment.',
+                            title: isReceivable
+                                ? 'Delete receivable?'
+                                : 'Delete debt?',
+                            message: 'This removes the outstanding balance without recording a payment. Existing transactions are kept.',
                           );
                           if (yes == true && mounted) {
                             await run(widget.onDelete!);
                           }
                         },
-                  child: const FittedBox(child: Text('Delete')),
+                  child: const Text('Delete'),
                 ),
               ),
             Expanded(
               child: TextButton(
                 onPressed: busy ? null : () => Navigator.pop(context),
-                child: const FittedBox(child: Text('Cancel')),
+                child: const Text('Cancel'),
               ),
             ),
             Expanded(
               child: FilledButton(
-                onPressed: busy
-                    ? null
-                    : () {
-                        if (form.currentState!.validate()) {
-                          run(
-                            () => widget.onSave(
-                              Debt(
-                                id: widget.debt?.id,
-                                name: name.text.trim(),
-                                amount: widget.currency.parseInput(amount.text),
-                                currency: widget.currency,
-                              ),
-                            ),
-                          );
-                        }
-                      },
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: BusyLabel(
-                    busy: busy,
-                    label: busy ? 'Saving...' : 'Save debt',
-                  ),
+                onPressed: busy ? null : save,
+                child: BusyLabel(
+                  busy: busy,
+                  label: busy ? 'Saving...' : 'Save',
                 ),
               ),
             ),

@@ -8,6 +8,7 @@ import '../core/presentation/category_icons.dart';
 import '../core/presentation/info_button.dart';
 import '../core/presentation/ledger_refresh.dart';
 import 'category_form.dart';
+import '../core/presentation/outlined_tabs.dart';
 
 class CategoriesScreen extends StatefulWidget {
   const CategoriesScreen({
@@ -79,38 +80,16 @@ class _CategoriesScreenState extends State<CategoriesScreen>
       store: widget.store,
       child: Column(
         children: [
-          AnimatedBuilder(
-            animation: tabs,
-            builder: (context, _) {
-              final color = tabs.index == 0
-                  ? const Color(0xffdf373f)
-                  : const Color(0xff249b6a);
-              return Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-                child: TabBar(
-                  controller: tabs,
-                  dividerHeight: 0,
-                  indicatorSize: TabBarIndicatorSize.tab,
-                  labelColor: color,
-                  unselectedLabelColor: Theme.of(context)
-                      .colorScheme
-                      .onSurfaceVariant,
-                  labelStyle: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16,
-                  ),
-                  indicator: BoxDecoration(
-                    color: color.withValues(alpha: .08),
-                    borderRadius: BorderRadius.circular(32),
-                    border: Border.all(color: color, width: 2),
-                  ),
-                  tabs: const [
-                    Tab(text: 'Expenses', height: 52),
-                    Tab(text: 'Income', height: 52),
-                  ],
-                ),
-              );
-            },
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+            child: OutlinedTabs(
+              controller: tabs,
+              colors: const [OutlinedTabs.expense, OutlinedTabs.income],
+              tabs: const [
+                Tab(text: 'Expenses', height: 52),
+                Tab(text: 'Income', height: 52),
+              ],
+            ),
           ),
           Expanded(
             child: ListenableBuilder(

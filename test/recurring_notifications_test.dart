@@ -19,11 +19,13 @@ void main() {
   late List<MethodCall> startupCalls;
   var zone = 'Europe/Berlin';
   var exact = true;
+  Map<String, Object?>? launchResponse;
   setUp(() async {
     AndroidFlutterLocalNotificationsPlugin.registerWith();
     sqfliteFfiInit();
     calls.clear();
     exact = true;
+    launchResponse = null;
     zone = 'Europe/Berlin';
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
@@ -31,7 +33,8 @@ void main() {
           return switch (call.method) {
             'initialize' => true,
             'getNotificationAppLaunchDetails' => {
-              'notificationLaunchedApp': false,
+              'notificationLaunchedApp': launchResponse != null,
+              'notificationResponse': ?launchResponse,
             },
             'pendingNotificationRequests' ||
             'getActiveNotifications' => <Map<String, Object?>>[],
@@ -125,9 +128,24 @@ void main() {
     final android = first['platformSpecifics'] as Map;
     expect(android['ongoing'], isTrue);
     expect(android['autoCancel'], isFalse);
-    expect((android['actions'] as List).single['id'], 'confirm');
-    expect((android['actions'] as List).single['showsUserInterface'], isTrue);
-    expect((android['actions'] as List).single['cancelNotification'], isFalse);
+    expect(
+      (android['actions'] as List).singleWhere(
+        (a) => a['id'] == 'confirm',
+      )['id'],
+      'confirm',
+    );
+    expect(
+      (android['actions'] as List).singleWhere(
+        (a) => a['id'] == 'confirm',
+      )['showsUserInterface'],
+      isTrue,
+    );
+    expect(
+      (android['actions'] as List).singleWhere(
+        (a) => a['id'] == 'confirm',
+      )['cancelNotification'],
+      isFalse,
+    );
     expect(scheduled.map((c) => (c.arguments as Map)['id']).toSet().length, 60);
     expect(store.entries, isEmpty);
     zone = 'America/New_York';
@@ -141,6 +159,124 @@ void main() {
     );
     expect(reminders.message.value, isNull);
   });
+
+  test(
+    'notification body tap queues matching occurrence without posting money',
+    () async {
+      final today = dateOnly(DateTime.now());
+      await add(today);
+      await store.processRecurring();
+      final occurrence = store.recurringOccurrences.single;
+      final response = const StandardMethodCodec().encodeMethodCall(
+        MethodCall('didReceiveNotificationResponse', {
+          'notificationResponseType': 0,
+          'id': 1,
+          'payload': jsonEncode({
+            'rule': occurrence.ruleId,
+            'date': dayKey(occurrence.date),
+          }),
+        }),
+      );
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .handlePlatformMessage(channel.name, response, (_) {});
+      for (var i = 0; i < 30 && reminders.occurrenceToOpen.value == null; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect(reminders.occurrenceToOpen.value, occurrence.id);
+      expect(store.entries, isEmpty);
+    },
+  );
+
+  test('settings disable cancels reminders and preserves pending payments across startup', () async {
+    final today = dateOnly(DateTime.now());
+    await add(today);
+    await store.processRecurring();
+    await reminders.settled;
+    final pendingIds = store.recurringOccurrences.map((o) => o.id).toList();
+    calls.clear();
+    await store.saveNotificationsEnabled(false);
+    await reminders.settled;
+    expect(calls.where((c) => c.method == 'cancelAll'), isNotEmpty);
+    expect(store.recurringOccurrences.map((o) => o.id).toList(), pendingIds);
+    expect(store.entries, isEmpty);
+    reminders.dispose();
+    await reminders.settled;
+    calls.clear();
+    reminders = RecurringNotifications(store, testPlatform: true);
+    await reminders.initialize();
+    await reminders.settled;
+    expect(
+      calls.where((c) => c.method == 'requestNotificationsPermission'),
+      isEmpty,
+    );
+    expect(
+      calls.where((c) => c.method == 'zonedSchedule' || c.method == 'show'),
+      isEmpty,
+    );
+    calls.clear();
+    await store.saveNotificationsEnabled(true);
+    await reminders.settled;
+    expect(calls.where((c) => c.method == 'zonedSchedule'), isNotEmpty);
+    expect(store.entries, isEmpty);
+  });
+
+  test('terminated launch retains target until navigation is ready', () async {
+    final today = dateOnly(DateTime.now());
+    await add(today);
+    await store.processRecurring();
+    final occurrence = store.recurringOccurrences.single;
+    reminders.dispose();
+    await reminders.settled;
+    launchResponse = {
+      'notificationResponseType': 0,
+      'notificationId': 1,
+      'payload': jsonEncode({
+        'rule': occurrence.ruleId,
+        'date': dayKey(occurrence.date),
+      }),
+    };
+    reminders = RecurringNotifications(store, testPlatform: true);
+    await reminders.initialize();
+    await reminders.settled;
+    expect(reminders.occurrenceToOpen.value, occurrence.id);
+    expect(store.entries, isEmpty);
+  });
+
+  test(
+    'native Add to debts action creates one debt without charging the account',
+    () async {
+      final today = dateOnly(DateTime.now());
+      await add(today);
+      await store.processRecurring();
+      await reminders.settled;
+      final occurrence = store.recurringOccurrences.single;
+      final response = const StandardMethodCodec().encodeMethodCall(
+        MethodCall('didReceiveNotificationResponse', {
+          'notificationResponseType': 1,
+          'actionId': 'debt',
+          'id': 1,
+          'payload': jsonEncode({
+            'rule': occurrence.ruleId,
+            'date': dayKey(occurrence.date),
+          }),
+        }),
+      );
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .handlePlatformMessage(channel.name, response, (_) {});
+      for (var i = 0; i < 50 && store.debts.isEmpty; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      await reminders.settled;
+      expect(store.debts.single.amount, occurrence.amount);
+      expect(store.entries, isEmpty);
+      expect(store.recurringOccurrences.single.status, 'skipped');
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .handlePlatformMessage(channel.name, response, (_) {});
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await reminders.settled;
+      expect(store.debts.length, 1);
+    },
+  );
 
   test('confirmation notification posts on confirmation date and repeated action cannot double post', () async {
     final today = dateOnly(DateTime.now());
@@ -177,4 +313,73 @@ void main() {
       isNotEmpty,
     );
   });
+  test('debt deadlines schedule local actions, route to debt without posting, cancel when kept', () async {
+    final now = DateTime.now();
+    final deadline = DateTime(now.year, now.month, now.day + 1, 10, 30);
+    await store.saveDebt(
+      Debt(
+        name: 'Loan deadline',
+        amount: 5000,
+        currency: Currency.eur,
+        deadline: deadline,
+      ),
+    );
+    await reminders.settled;
+    final d = store.debts.single;
+    final request = calls.lastWhere((c) => c.method == 'zonedSchedule');
+    final args = request.arguments as Map;
+    expect(args['id'], -d.id!);
+    expect(args['scheduledDateTime'], contains('10:30'));
+    final payload = args['payload'] as String;
+    final response = const StandardMethodCodec().encodeMethodCall(
+      MethodCall('didReceiveNotificationResponse', {
+        'notificationResponseType': 1,
+        'id': -d.id!,
+        'actionId': 'keep',
+        'payload': payload,
+      }),
+    );
+    await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .handlePlatformMessage(channel.name, response, (_) {});
+    expect(reminders.occurrenceToOpen.value, -d.id!);
+    expect(reminders.debtAction, 'keep');
+    expect(store.entries, isEmpty);
+    expect(store.debts.single.amount, 5000);
+    calls.clear();
+    await store.acknowledgeDebtDeadline(d.id!, deadline);
+    await reminders.settled;
+    expect(calls.where((c) => c.method == 'zonedSchedule'), isEmpty);
+    reminders.occurrenceToOpen.value = null;
+    await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .handlePlatformMessage(channel.name, response, (_) {});
+    expect(reminders.occurrenceToOpen.value, isNull);
+  });
+  test(
+    'debt deadlines share the 60 request cap with recurring reminders',
+    () async {
+      final now = DateTime.now();
+      final first = DateTime(now.year, now.month, now.day + 1, 9);
+      for (var i = 0; i < 3; i++) {
+        await store.saveDebt(
+          Debt(
+            name: 'Due $i',
+            amount: 500,
+            currency: Currency.eur,
+            deadline: first.add(Duration(days: i)),
+          ),
+        );
+      }
+      await reminders.settled;
+      calls.clear();
+      await add(dateOnly(first));
+      await reminders.settled;
+      final requests = calls
+          .where((c) => c.method == 'zonedSchedule')
+          .map((c) => c.arguments as Map)
+          .toList();
+      // Mock OS returns no pending requests, so the final sync reissues the shared window.
+      expect(requests.length, 60);
+      expect(requests.where((a) => (a['id'] as int) < 0).length, 3);
+    },
+  );
 }

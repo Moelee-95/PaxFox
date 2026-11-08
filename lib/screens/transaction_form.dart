@@ -19,8 +19,10 @@ class TransactionForm extends StatefulWidget {
     this.onSavedType,
     this.onSavedDate,
     this.initialDate,
+    this.debt,
   });
   final LedgerStore store;
+  final Debt? debt;
   final LedgerEntry? entry;
   final EntryType initialType;
   final ValueChanged<EntryType>? onSavedType;
@@ -46,6 +48,9 @@ class _TransactionFormState extends State<TransactionForm> {
   bool get saving => action.busy;
   String? get error => action.error;
   Future<Map<String, Object?>?>? scannedInvoice;
+  bool get isDebtSettlement =>
+      widget.debt != null ||
+      widget.store.debtPaymentLinks.containsKey(widget.entry?.id);
   bool get originallyUnassigned =>
       widget.entry?.id != null && widget.entry?.accountId == null;
   @override
@@ -57,7 +62,13 @@ class _TransactionFormState extends State<TransactionForm> {
       scannedInvoice = widget.store.scannedInvoiceFor(e.id!);
     }
     currency = e?.currency ?? widget.store.currency;
-    type = e?.type ?? widget.initialType;
+    type =
+        e?.type ??
+        (widget.debt == null
+            ? widget.initialType
+            : widget.debt!.isReceivable
+            ? EntryType.income
+            : EntryType.expense);
     date = e?.date ?? widget.initialDate ?? dateOnly(DateTime.now());
     createdAt = e?.createdAt;
     accountId = e?.accountId;
@@ -78,7 +89,11 @@ class _TransactionFormState extends State<TransactionForm> {
     }
     originalInputCurrency = currency;
     amount = TextEditingController(
-      text: e == null ? '' : currency.formatGrouped(originalInputAmount),
+      text: e == null
+          ? (widget.debt == null
+                ? ''
+                : currency.formatGrouped(widget.debt!.amount))
+          : currency.formatGrouped(originalInputAmount),
     );
     final receivedMinor =
         e?.destinationAmount ??
@@ -90,8 +105,14 @@ class _TransactionFormState extends State<TransactionForm> {
                 .formatGrouped(receivedMinor),
     );
     originalReceived = received.text;
-    description = TextEditingController(text: e?.description ?? '');
-    category = e?.type == EntryType.transfer ? null : e?.category;
+    description = TextEditingController(
+      text: e?.description ?? widget.debt?.name ?? '',
+    );
+    category = widget.debt != null
+        ? widget.store.debtCategory(type)
+        : e?.type == EntryType.transfer
+        ? null
+        : e?.category;
     notes = TextEditingController(text: e?.notes ?? '');
   }
 
@@ -156,7 +177,11 @@ class _TransactionFormState extends State<TransactionForm> {
                     ? destinationAccount!.currency.parseInput(received.text)
                     : null,
               );
-        await widget.store.saveEntry(entry, createdAt: createdAt);
+        if (widget.debt != null && entry.id == null) {
+          await widget.store.payDebt(widget.debt!.id!, entry);
+        } else {
+          await widget.store.saveEntry(entry, createdAt: createdAt);
+        }
       },
       failureMessage: 'Could not save. Check the fields and account currencies, then retry.',
     );
@@ -314,7 +339,7 @@ class _TransactionFormState extends State<TransactionForm> {
         type: type,
         value: category,
         header: true,
-        enabled: !saving,
+        enabled: !saving && !isDebtSettlement,
         types: EntryType.values,
         onChanged: (value) => setState(() {
           type = value.type;
@@ -337,6 +362,13 @@ class _TransactionFormState extends State<TransactionForm> {
           ),
       ],
       children: [
+        if (widget.debt != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(
+              'Remaining: ${widget.store.currency.display(widget.debt!.amount)}. Enter a partial or full ${widget.debt!.isReceivable ? 'receipt' : 'payment'}; the remaining balance updates when saved.',
+            ),
+          ),
         if (scannedInvoice != null)
           InvoiceSourceDetails(
             source: scannedInvoice!,

@@ -7,6 +7,7 @@ import '../../features/receipts/invoice.dart';
 import '../../features/receipts/gemini_key_provider.dart';
 import '../../features/receipts/invoice_images.dart';
 import '../domain/category.dart';
+import '../domain/currency_exchange.dart';
 import '../domain/ledger.dart';
 import '../domain/ledger_queries.dart';
 import '../domain/recurring.dart';
@@ -82,12 +83,56 @@ class LedgerStore extends ChangeNotifier {
   Currency get currency => _currency;
   List<Debt> _debts = const [];
   List<Debt> get debts => _debts;
-  int get totalDebt => debts.fold(0, (sum, debt) => sum + debt.amount);
-  int get netWealth => currentBalances.wealth - totalDebt;
+  int get totalDebt => debts
+      .where((d) => !d.isReceivable)
+      .fold(0, (sum, debt) => sum + (debtMainAmount(debt) ?? 0));
+  int get totalReceivable => debts
+      .where((d) => d.isReceivable)
+      .fold(0, (sum, debt) => sum + (debtMainAmount(debt) ?? 0));
+  CurrencyExchangeTable exchangeTable = CurrencyExchangeTable({});
+  int? debtMainAmount(Debt debt) => debt.amount == 0
+      ? 0
+      : exchangeTable.convert(debt.amount, debt.currency, currency);
+  bool get hasUnvaluedDebts =>
+      debts.any((d) => d.amount > 0 && debtMainAmount(d) == null);
+  Future<void> saveExchangeRates(Map<String, String> values) async {
+    final normalized = <String, String>{};
+    for (final item in values.entries) {
+      final pair = item.key.split('_');
+      if (pair.length != 2 || pair[0] == pair[1]) {
+        throw ArgumentError('Choose two different currencies.');
+      }
+      Currency.values.byName(pair[0]);
+      Currency.values.byName(pair[1]);
+      normalized[item.key] = ConversionRate.parse(item.value).text;
+    }
+    await db.transaction((txn) async {
+      await txn.insert('settings', {
+        'key': 'currency_exchange_rates',
+        'value': jsonEncode(normalized),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    });
+    await _refreshAfterWrite();
+  }
+
+  Map<int, int> _debtFeeLinks = const {};
+  Map<int, int> get debtFeeLinks => _debtFeeLinks;
+  Map<int, int> _debtPaymentLinks = const {};
+  Map<int, int> get debtPaymentLinks => _debtPaymentLinks;
+  int get netWealth => currentBalances.wealth - totalDebt + totalReceivable;
   int invoiceTimeoutSeconds = 180;
   String geminiConfigUrl = GeminiKeyProvider.configUrl;
   bool geminiUseManualKey = false;
+  bool notificationsEnabled = true;
   String geminiManualKey = '';
+
+  Future<void> saveNotificationsEnabled(bool enabled) async {
+    await db.insert('settings', {
+      'key': 'notifications_enabled',
+      'value': enabled.toString(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await _refreshAfterWrite();
+  }
 
   static bool validGeminiConfigUrl(String value) {
     final uri = Uri.tryParse(value.trim());
@@ -243,8 +288,6 @@ class LedgerStore extends ChangeNotifier {
       );
       final debtList = (await txn.query(
         'debts',
-        where: 'currency = ?',
-        whereArgs: [activeCurrency.name],
         orderBy: 'name',
       )).map(Debt.fromMap).toList();
       final savedTimeout = int.tryParse(
@@ -333,12 +376,30 @@ class LedgerStore extends ChangeNotifier {
         geminiConfigUrl:
             settingsByKey['gemini_config_url'] ?? GeminiKeyProvider.configUrl,
         geminiUseManualKey: settingsByKey['gemini_use_manual_key'] == 'true',
+        notificationsEnabled: settingsByKey['notifications_enabled'] != 'false',
         geminiManualKey: settingsByKey['gemini_manual_key'] ?? '',
         profileName: settingsByKey['profile_name'] ?? '',
         profileEmail: settingsByKey['profile_email'] ?? '',
         deletableBankIds: deletableBankIds,
         currency: activeCurrency,
         debts: debtList,
+        exchangeRates: Map<String, String>.from(
+          jsonDecode(settingsByKey['currency_exchange_rates'] ?? '{}') as Map,
+        ),
+        debtFeeLinks: {
+          for (final row in await txn.query(
+            'debt_payments',
+            where: 'debt_id IS NOT NULL AND fee_transaction_id IS NOT NULL',
+          ))
+            row['fee_transaction_id'] as int: row['transaction_id'] as int,
+        },
+        debtPaymentLinks: {
+          for (final row in await txn.query(
+            'debt_payments',
+            where: 'debt_id IS NOT NULL',
+          ))
+            row['transaction_id'] as int: row['debt_id'] as int,
+        },
         timeout: timeout,
         receiptIds: receiptIds,
         scannedIds: scannedIds,
@@ -368,9 +429,13 @@ class LedgerStore extends ChangeNotifier {
     _profileName = snapshot.profileName;
     _profileEmail = snapshot.profileEmail;
     _debts = List.unmodifiable(snapshot.debts);
+    exchangeTable = CurrencyExchangeTable(snapshot.exchangeRates);
+    _debtPaymentLinks = Map.unmodifiable(snapshot.debtPaymentLinks);
+    _debtFeeLinks = Map.unmodifiable(snapshot.debtFeeLinks);
     invoiceTimeoutSeconds = snapshot.timeout;
     geminiConfigUrl = snapshot.geminiConfigUrl;
     geminiUseManualKey = snapshot.geminiUseManualKey;
+    notificationsEnabled = snapshot.notificationsEnabled;
     geminiManualKey = snapshot.geminiManualKey;
     _receiptTransactionIds = Set.unmodifiable(snapshot.receiptIds);
     _scannedInvoiceTransactionIds = Set.unmodifiable(snapshot.scannedIds);
@@ -688,6 +753,7 @@ class LedgerStore extends ChangeNotifier {
     LedgerEntry input, {
     bool allowUnassigned = false,
     bool checkFunds = true,
+    bool allowSettlementWrite = false,
   }) async {
     var entry = input;
     if (entry.id != null) {
@@ -795,11 +861,12 @@ class LedgerStore extends ChangeNotifier {
         oldEntry.amount != entry.amount &&
         oldEntry.accountAmount == entry.accountAmount &&
         jsonEncode(oldEntry.fx?.toMap()) == jsonEncode(entry.fx?.toMap());
-    if (staleAmounts ||
-        entry.accountAmount == null ||
-        (oldEntry != null &&
-            (oldEntry.accountId != entry.accountId ||
-                oldEntry.destinationId != entry.destinationId))) {
+    if (!allowSettlementWrite &&
+        (staleAmounts ||
+            entry.accountAmount == null ||
+            (oldEntry != null &&
+                (oldEntry.accountId != entry.accountId ||
+                    oldEntry.destinationId != entry.destinationId)))) {
       final sourceRows = entry.accountId == null
           ? <Map<String, Object?>>[]
           : await txn.query(
@@ -868,6 +935,42 @@ class LedgerStore extends ChangeNotifier {
           (entry.type != EntryType.transfer &&
               (fx.targetCurrency != null || fx.targetAmount != null))) {
         throw ArgumentError('Currency details do not match this transaction.');
+      }
+    }
+    if (entry.id != null &&
+        !allowSettlementWrite &&
+        (await txn.query(
+          'debt_payments',
+          where: 'fee_transaction_id = ? AND debt_id IS NOT NULL',
+          whereArgs: [entry.id],
+        )).isNotEmpty) {
+      throw ArgumentError('Edit this fee through the linked debt payment.');
+    }
+    if (entry.id != null) {
+      final links = await txn.rawQuery(
+        'SELECT p.amount AS paid, p.details, d.amount AS remaining, d.is_receivable FROM debt_payments p JOIN debts d ON d.id = p.debt_id WHERE p.transaction_id = ?',
+        [entry.id],
+      );
+      if (links.isNotEmpty) {
+        final link = links.single;
+        final expected = link['is_receivable'] == 1
+            ? EntryType.income
+            : EntryType.expense;
+        if (entry.type != expected ||
+            entry.category != debtCategory(expected)) {
+          throw ArgumentError(
+            'Keep the Debt category and payment type for this settlement.',
+          );
+        }
+        if (link['details'] != null && !allowSettlementWrite) {
+          throw ArgumentError(
+            'Edit this payment from its debt settlement editor.',
+          );
+        }
+        if (link['details'] == null &&
+            entry.amount > (link['paid'] as int) + (link['remaining'] as int)) {
+          throw ArgumentError('Payment exceeds the remaining balance.');
+        }
       }
     }
     final now = DateTime.now().toUtc().toIso8601String();
@@ -974,7 +1077,19 @@ class LedgerStore extends ChangeNotifier {
     final imagePaths = <String>[];
     await db.transaction((txn) async {
       final affected = <int>{};
+      final deleting = {...ids};
       for (final id in ids) {
+        for (final link in await txn.query(
+          'debt_payments',
+          where: 'transaction_id = ?',
+          whereArgs: [id],
+        )) {
+          if (link['fee_transaction_id'] != null) {
+            deleting.add(link['fee_transaction_id'] as int);
+          }
+        }
+      }
+      for (final id in deleting) {
         final links = await txn.query(
           'scanned_invoice_entries',
           where: 'transaction_id = ?',
@@ -1308,8 +1423,17 @@ class LedgerStore extends ChangeNotifier {
         'Existing amounts cannot be relabeled to another currency.',
       );
     }
+    final setupRates = {...exchangeTable.rates};
+    for (final account in newAccounts.where(
+      (a) => a.currency != setupCurrency,
+    )) {
+      setupRates.putIfAbsent(
+        CurrencyExchangeTable.key(setupCurrency, account.currency),
+        () => account.exchangeRate,
+      );
+    }
     for (final debt in initialDebts) {
-      _validateDebt(debt, setupCurrency);
+      _validateDebt(debt);
     }
     for (final account in newAccounts) {
       _validateAccount(account, selectedCurrency: setupCurrency);
@@ -1341,6 +1465,10 @@ class LedgerStore extends ChangeNotifier {
         await _writeDebt(txn, debt);
       }
       await txn.insert('settings', {
+        'key': 'currency_exchange_rates',
+        'value': jsonEncode(setupRates),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert('settings', {
         'key': 'app_currency',
         'value': setupCurrency.name,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -1352,27 +1480,29 @@ class LedgerStore extends ChangeNotifier {
     await _refreshAfterWrite();
   }
 
-  static void _validateDebt(Debt debt, Currency expected) {
+  static void _validateDebt(Debt debt) {
     if (debt.name.trim().isEmpty ||
         debt.amount < 0 ||
-        debt.amount > 9000000000000000 ||
-        debt.currency != expected) {
+        debt.amount > 9000000000000000) {
       throw ArgumentError(
-        'Enter a lender and a valid outstanding amount in the app currency.',
+        'Enter a lender and a valid outstanding amount in the selected currency.',
       );
     }
   }
 
-  static Future<void> _writeDebt(DatabaseExecutor txn, Debt debt) async {
+  static Future<int> _writeDebt(DatabaseExecutor txn, Debt debt) async {
     final now = DateTime.now().toUtc().toIso8601String();
     final values = <String, Object?>{
       'name': debt.name.trim(),
+      'is_receivable': debt.isReceivable ? 1 : 0,
       'amount': debt.amount,
       'currency': debt.currency.name,
       'updated_at': now,
+      'deadline': debt.deadline?.toIso8601String(),
+      'deadline_acknowledged': debt.deadlineAcknowledged?.toIso8601String(),
     };
     if (debt.id == null) {
-      await txn.insert('debts', {...values, 'created_at': now});
+      return txn.insert('debts', {...values, 'created_at': now});
     } else {
       final count = await txn.update(
         'debts',
@@ -1381,12 +1511,381 @@ class LedgerStore extends ChangeNotifier {
         whereArgs: [debt.id],
       );
       if (count != 1) throw ArgumentError('Debt no longer exists.');
+      return debt.id!;
     }
   }
 
+  static Future<CurrencyExchangeTable> _readExchangeTable(
+    DatabaseExecutor txn,
+  ) async {
+    final row = (await txn.query(
+      'settings',
+      where: 'key = ?',
+      whereArgs: ['currency_exchange_rates'],
+    )).firstOrNull;
+    return CurrencyExchangeTable(
+      Map<String, String>.from(
+        jsonDecode(row?['value'] as String? ?? '{}') as Map,
+      ),
+    );
+  }
+
   Future<void> saveDebt(Debt debt) async {
-    _validateDebt(debt, currency);
-    await db.transaction((txn) => _writeDebt(txn, debt));
+    _validateDebt(debt);
+    await db.transaction((txn) async {
+      if (debt.id != null) {
+        final old = (await txn.query(
+          'debts',
+          where: 'id = ?',
+          whereArgs: [debt.id],
+        )).firstOrNull;
+        if (old != null &&
+            ((old['is_receivable'] == 1) != debt.isReceivable ||
+                old['currency'] != debt.currency.name) &&
+            (await txn.query(
+              'debt_payments',
+              where: 'debt_id = ?',
+              whereArgs: [debt.id],
+            )).isNotEmpty) {
+          throw ArgumentError(
+            'A debt with payments cannot change currency or direction.',
+          );
+        }
+      }
+      await _writeDebt(txn, debt);
+    });
+    await _refreshAfterWrite();
+  }
+
+  String debtCategory(EntryType type) =>
+      categoriesFor(type).firstWhere((c) => c.isSystemDebt).name;
+
+  Future<void> payDebt(int debtId, LedgerEntry entry) async {
+    if (entry.id != null) {
+      throw ArgumentError('Use a new transaction to settle a debt.');
+    }
+    await db.transaction((txn) async {
+      final row = (await txn.query(
+        'debts',
+        where: 'id = ?',
+        whereArgs: [debtId],
+      )).firstOrNull;
+      if (row == null) throw ArgumentError('Debt no longer exists.');
+      final debt = Debt.fromMap(row);
+      final expected = debt.isReceivable ? EntryType.income : EntryType.expense;
+      if (entry.type != expected ||
+          entry.category != debtCategory(expected) ||
+          entry.currency != debt.currency ||
+          entry.amount > debt.amount) {
+        throw ArgumentError(
+          'Choose the Debt category and an amount up to the remaining balance.',
+        );
+      }
+      final id = await _writeEntry(txn, entry);
+      await txn.insert('debt_payments', {
+        'transaction_id': id,
+        'debt_id': debtId,
+        'amount': entry.amount,
+      });
+    });
+    await _refreshAfterWrite();
+  }
+
+  Future<Map<String, Object?>?> debtSettlement(int transactionId) async =>
+      (await db.query(
+        'debt_payments',
+        where: 'transaction_id = ?',
+        whereArgs: [transactionId],
+      )).firstOrNull;
+
+  /// Principal is in debt minor units; fee is in the selected account's units.
+  /// Both ledger effects and the outstanding native balance commit together.
+  Future<void> settleDebt({
+    required int debtId,
+    required int principal,
+    required int accountId,
+    required ConversionRate rate,
+    required int fee,
+    required DateTime date,
+    int? transactionId,
+    String? description,
+    DateTime? createdAt,
+  }) async {
+    await db.transaction((txn) async {
+      final row = (await txn.query(
+        'debts',
+        where: 'id = ?',
+        whereArgs: [debtId],
+      )).firstOrNull;
+      if (row == null) throw ArgumentError('Debt no longer exists.');
+      final debt = Debt.fromMap(row);
+      final account = Account.fromMap(
+        (await txn.query(
+          'accounts',
+          where: 'id = ?',
+          whereArgs: [accountId],
+        )).single,
+      );
+      final old = transactionId == null
+          ? null
+          : (await txn.query(
+              'debt_payments',
+              where: 'transaction_id = ? AND debt_id = ?',
+              whereArgs: [transactionId, debtId],
+            )).firstOrNull;
+      if (transactionId != null && old == null) {
+        throw ArgumentError('Settlement no longer exists.');
+      }
+      if (principal <= 0 ||
+          principal > debt.amount + (old?['amount'] as int? ?? 0) ||
+          fee < 0) {
+        throw ArgumentError(
+          'Enter a payment up to the remaining balance and a nonnegative fee.',
+        );
+      }
+      if (account.currency == debt.currency && fee != 0) {
+        throw ArgumentError('Fees apply only to currency conversion.');
+      }
+      final actualRate = account.currency == debt.currency
+          ? ConversionRate.parse('1')
+          : rate;
+      final native = actualRate.convert(
+        principal,
+        debt.currency,
+        account.currency,
+      );
+      if (native <= 0 || (debt.isReceivable && fee >= native)) {
+        throw ArgumentError(
+          'The converted amount must exceed zero and any receiving fee.',
+        );
+      }
+      final affected = <int>{accountId};
+      final oldEntry = transactionId == null
+          ? null
+          : LedgerEntry.fromMap(
+              (await txn.query(
+                'transactions',
+                where: 'id = ?',
+                whereArgs: [transactionId],
+              )).single,
+            );
+      if (oldEntry?.accountId != null) affected.add(oldEntry!.accountId!);
+      LedgerEntry? previousFee;
+      if (old?['fee_transaction_id'] != null) {
+        final feeId = old!['fee_transaction_id'] as int;
+        final oldFee = (await txn.query(
+          'transactions',
+          where: 'id = ?',
+          whereArgs: [feeId],
+        )).firstOrNull;
+        if (oldFee?['account_id'] != null) {
+          affected.add(oldFee!['account_id'] as int);
+        }
+        if (oldFee != null) previousFee = LedgerEntry.fromMap(oldFee);
+        if (fee == 0) {
+          await txn.delete('transactions', where: 'id = ?', whereArgs: [feeId]);
+        }
+      }
+      final details = jsonEncode({
+        'rate': actualRate.toMap(),
+        'account_currency': account.currency.name,
+        'debt_currency': debt.currency.name,
+      });
+      if (old != null) {
+        await txn.update(
+          'debt_payments',
+          {'details': details, 'amount': principal},
+          where: 'transaction_id = ?',
+          whereArgs: [transactionId],
+        );
+      }
+      LedgerEntry entry(
+        EntryType type,
+        int value,
+        String category,
+        String label, {
+        int? id,
+      }) {
+        final previous = id == transactionId ? oldEntry : previousFee;
+        final unchanged =
+            previous != null &&
+            previous.accountId == accountId &&
+            previous.accountAmount == value;
+        final reporting = unchanged ? previous.amount : account.toBase(value);
+        if (reporting <= 0) {
+          throw ArgumentError('Amount is too small in ${currency.code}.');
+        }
+        return LedgerEntry(
+          id: id,
+          type: type,
+          amount: reporting,
+          currency: currency,
+          accountId: accountId,
+          accountAmount: value,
+          date: date,
+          description: label,
+          category: category,
+          notes: [
+            if (previous != null)
+              ...previous.notes
+                  .split('\n')
+                  .where((line) => !line.startsWith('Settlement: ')),
+            'Settlement: ${debt.currency.display(principal)}; 1 ${debt.currency.code} = ${actualRate.text} ${account.currency.code}',
+          ].where((line) => line.isNotEmpty).join('\n'),
+          fx: unchanged
+              ? previous.fx
+              : FxSnapshot(
+                  inputCurrency: currency,
+                  inputAmount: reporting,
+                  sourceCurrency: account.currency,
+                  sourceAmount: value,
+                  sourceRate: account.exchangeRate,
+                ),
+        );
+      }
+
+      final type = debt.isReceivable ? EntryType.income : EntryType.expense;
+      final id = await _writeEntry(
+        txn,
+        entry(
+          type,
+          native,
+          debtCategory(type),
+          description ?? debt.name,
+          id: transactionId,
+        ),
+        checkFunds: false,
+        allowSettlementWrite: true,
+      );
+      if (createdAt != null && transactionId != null) {
+        await txn.update(
+          'transactions',
+          {'created_at': createdAt.toUtc().toIso8601String()},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      }
+      int? feeId;
+      if (fee > 0) {
+        await txn.execute(
+          "INSERT OR IGNORE INTO categories(kind,name,icon) VALUES ('expense','Exchange fees','general')",
+        );
+        feeId = await _writeEntry(
+          txn,
+          entry(
+            EntryType.expense,
+            fee,
+            'Exchange fees',
+            'Exchange fee: ${debt.name}',
+            id: previousFee?.id,
+          ),
+          checkFunds: false,
+          allowSettlementWrite: true,
+        );
+      }
+      if (old == null) {
+        await txn.insert('debt_payments', {
+          'transaction_id': id,
+          'debt_id': debtId,
+          'amount': principal,
+          'details': details,
+          'fee_transaction_id': feeId,
+        });
+      } else {
+        await txn.update(
+          'debt_payments',
+          {'fee_transaction_id': feeId},
+          where: 'transaction_id = ?',
+          whereArgs: [id],
+        );
+      }
+      await _checkFunds(txn, affected);
+    });
+    await _refreshAfterWrite();
+  }
+
+  Future<void> moveRecurringToDebt(int occurrenceId) async {
+    await db.transaction((txn) async {
+      if ((await txn.query(
+        'recurring_debts',
+        where: 'occurrence_id = ?',
+        whereArgs: [occurrenceId],
+      )).isNotEmpty) {
+        return;
+      }
+      final row = (await txn.query(
+        'recurring_occurrences',
+        where: 'id = ?',
+        whereArgs: [occurrenceId],
+      )).firstOrNull;
+      if (row == null) throw ArgumentError('Payment no longer exists.');
+      final occurrence = RecurringOccurrence.fromMap(row);
+      if (!occurrence.manual || occurrence.status != 'failed') {
+        throw ArgumentError(
+          'Only an unconfirmed manual payment can become a debt.',
+        );
+      }
+      final account = Account.fromMap(
+        (await txn.query(
+          'accounts',
+          where: 'id = ?',
+          whereArgs: [occurrence.accountId],
+        )).single,
+      );
+      final inputCurrency = occurrence.currency ?? currency;
+      final debt = Debt(
+        name: occurrence.description,
+        amount: occurrence.amount,
+        currency: inputCurrency,
+        isReceivable: occurrence.type == EntryType.income,
+      );
+      _validateDebt(debt);
+      if (occurrence.amount <= 0) {
+        throw ArgumentError('Debt amount must be positive.');
+      }
+      final table = await _readExchangeTable(txn);
+      if (table.rate(inputCurrency, currency) == null &&
+          inputCurrency == account.currency) {
+        final rates = {
+          ...table.rates,
+          CurrencyExchangeTable.key(currency, inputCurrency):
+              account.exchangeRate,
+        };
+        await txn.insert('settings', {
+          'key': 'currency_exchange_rates',
+          'value': jsonEncode(rates),
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      final debtId = await _writeDebt(txn, debt);
+      await txn.insert('recurring_debts', {
+        'occurrence_id': occurrenceId,
+        'debt_id': debtId,
+      });
+      await txn.update(
+        'recurring_occurrences',
+        {
+          'status': 'skipped',
+          'error': debt.isReceivable
+              ? 'Moved to receivables'
+              : 'Moved to debts',
+        },
+        where: 'id = ?',
+        whereArgs: [occurrenceId],
+      );
+    });
+    await _refreshAfterWrite();
+  }
+
+  List<Debt> dueDebts([DateTime? now]) =>
+      debts.where((d) => d.deadlineDue(now ?? DateTime.now())).toList()
+        ..sort((a, b) => a.deadline!.compareTo(b.deadline!));
+  Future<void> acknowledgeDebtDeadline(int id, DateTime deadline) async {
+    await db.update(
+      'debts',
+      {'deadline_acknowledged': deadline.toIso8601String()},
+      where: 'id = ? AND deadline = ?',
+      whereArgs: [id, deadline.toIso8601String()],
+    );
     await _refreshAfterWrite();
   }
 
@@ -1435,6 +1934,12 @@ class LedgerStore extends ChangeNotifier {
         );
         if (old.isEmpty) {
           throw ArgumentError('Category no longer exists.');
+        }
+        if ((old.single['name'] as String).toLowerCase() == 'debt' &&
+            trimmed != old.single['name']) {
+          throw ArgumentError(
+            'The built-in Debt category name is fixed. You can change its icon and color.',
+          );
         }
         await txn.update(
           'categories',
@@ -1545,7 +2050,7 @@ class LedgerStore extends ChangeNotifier {
       );
       if (accounts.isEmpty) {
         throw ArgumentError(
-          'Choose an unblocked payment account in the app currency.',
+          'Choose an unblocked payment account in the selected currency.',
         );
       }
       final account = Account.fromMap(accounts.single);

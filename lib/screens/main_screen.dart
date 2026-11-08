@@ -26,11 +26,14 @@ import 'home_screen.dart';
 import 'more_screen.dart';
 import 'overview_screen.dart';
 import 'recurring_screen.dart';
+import '../core/presentation/floating_navigation_bar.dart';
+import 'payment_notifications_screen.dart';
 import '../core/presentation/category_icons.dart';
 import '../core/domain/category.dart';
 import 'settings_screen.dart';
 import 'transaction_bulk_editor.dart';
 import 'transaction_form.dart';
+import 'debt_settlement_form.dart';
 import 'transactions_screen.dart';
 
 class MainScreen extends StatefulWidget {
@@ -45,11 +48,14 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   Drag? _homeEdgeDrag;
   final _addButtonKey = GlobalKey();
   Timer? _exitTimer;
+  Timer? _deadlineTimer;
   bool _checkingRecurring = false;
   String? _recurringError;
   final Set<int> _selectedIds = {};
   bool _bulkBusy = false;
   bool _openingTransaction = false;
+  bool _notificationsOpen = false;
+  final _notificationFocus = ValueNotifier<int?>(null);
   int _homeTab = 0;
   String? _homeCategory;
   int _navigationIndex = 0;
@@ -110,7 +116,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       type: _entryType,
       onSearchChanged: (value) => _changeFilter(() => _searchQuery = value),
       onTypeChanged: (value) => _changeFilter(() => _entryType = value),
-      tileBuilder: _transactionTile,
+      tileBuilder: (entry) => _transactionTile(entry, compact: true),
+      invoiceGroups: widget.store.invoiceGroups,
     ),
   );
 
@@ -189,6 +196,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     }),
     onMonthChanged: _changeMonth,
     tileBuilder: (entry) => _transactionTile(entry, compact: true),
+    invoiceGroups: widget.store.invoiceGroups,
     onOverviewDragStart: (details) {
       _homeEdgeDrag?.cancel();
       _exitTimer?.cancel();
@@ -211,8 +219,51 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _checkRecurring();
+    _deadlineTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
     RecurringNotifications.instance?.message.addListener(_reminderMessage);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _reminderMessage());
+    RecurringNotifications.instance?.occurrenceToOpen.addListener(
+      _openReminder,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _reminderMessage();
+      _openReminder();
+    });
+  }
+
+  void _openReminder() {
+    final reminders = RecurringNotifications.instance;
+    final id = reminders?.occurrenceToOpen.value;
+    if (!mounted || id == null) return;
+    reminders!.occurrenceToOpen.value = null;
+    if (_notificationFocus.value == id) _notificationFocus.value = null;
+    _notificationFocus.value = id;
+    _openNotifications();
+  }
+
+  Future<void> _openNotifications() async {
+    if (_notificationsOpen || !mounted) return;
+    _notificationsOpen = true;
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => PaymentNotificationsScreen(
+            store: widget.store,
+            focusedOccurrence: _notificationFocus,
+            takeDebtAction: () {
+              final n = RecurringNotifications.instance;
+              final action = n?.debtAction;
+              if (n != null) n.debtAction = null;
+              return action;
+            },
+          ),
+        ),
+      );
+    } finally {
+      _notificationsOpen = false;
+      if (mounted) _notificationFocus.value = null;
+    }
   }
 
   void _reminderMessage() {
@@ -227,13 +278,18 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     RecurringNotifications.instance?.message.removeListener(_reminderMessage);
+    RecurringNotifications.instance?.occurrenceToOpen.removeListener(
+      _openReminder,
+    );
     _exitTimer?.cancel();
     _homeEdgeDrag?.cancel();
+    _deadlineTimer?.cancel();
     _pageController.dispose();
     _homeChanges.dispose();
     _filterChanges.dispose();
     _selectionChanges.dispose();
     _recurringChanges.dispose();
+    _notificationFocus.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -324,6 +380,25 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       if (entry?.id != null &&
           widget.store.receiptTransactionIds.contains(entry!.id)) {
         setState(() => _openingTransaction = true);
+      }
+      final feePrincipal = widget.store.debtFeeLinks[entry?.id];
+      if (feePrincipal != null) {
+        entry = widget.store.entries.firstWhere((e) => e.id == feePrincipal);
+      }
+      final debtId = widget.store.debtPaymentLinks[entry?.id];
+      final debt = widget.store.debts.where((d) => d.id == debtId).firstOrNull;
+      if (entry != null && debt != null) {
+        await showAppSheet<bool>(
+          context,
+          editor: true,
+          builder: (_) => DebtSettlementForm(
+            store: widget.store,
+            debt: debt,
+            entry: entry,
+            onSavedDate: (date) => _goHome(date: date),
+          ),
+        );
+        return;
       }
       final receipt =
           entry?.id == null ||
@@ -441,7 +516,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   Widget _transactionTile(LedgerEntry entry, {bool compact = false}) =>
       TransactionTile(
-        invoiceLabel: widget.store.invoiceGroups[entry.id]?.label,
         key: ValueKey(entry.id),
         entry: entry,
         categoryIcon: widget.store.iconFor(entry),
@@ -554,6 +628,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     },
     child: Scaffold(
       appBar: AppBar(
+        centerTitle:
+            _selectedIds.isEmpty && !_showTransactions && _navigationIndex == 0,
         automaticallyImplyLeading: false,
         bottom: _bulkBusy
             ? const PreferredSize(
@@ -598,7 +674,23 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                   _exitTimer?.cancel();
                 }),
               )
-            : null,
+            : ListenableBuilder(
+                listenable: widget.store,
+                builder: (context, _) {
+                  final count =
+                      (pendingPaymentNotifications(widget.store).length +
+                      widget.store.dueDebts().length);
+                  return IconButton(
+                    tooltip: 'Notifications',
+                    onPressed: _openNotifications,
+                    icon: Badge.count(
+                      count: count,
+                      isLabelVisible: count > 0,
+                      child: const Icon(Icons.notifications_outlined),
+                    ),
+                  );
+                },
+              ),
       ),
       body: LedgerRefresh(
         store: widget.store,
@@ -662,27 +754,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             ),
       bottomNavigationBar: _showTransactions
           ? null
-          : NavigationBar(
+          : FloatingNavigationBar(
               selectedIndex: _navigationIndex,
-              onDestinationSelected: _selectPage,
-              destinations: const [
-                NavigationDestination(
-                  icon: Icon(Icons.home_outlined),
-                  label: 'Home',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.dashboard_outlined),
-                  label: 'Overview',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.timeline),
-                  label: 'Cashflow',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.more_horiz),
-                  label: 'More',
-                ),
-              ],
+              onSelected: _selectPage,
             ),
     ),
   );

@@ -345,7 +345,16 @@ class Debt {
     required this.amount,
     required this.currency,
     this.createdAt,
+    this.isReceivable = false,
+    this.deadline,
+    this.deadlineAcknowledged,
   });
+  final DateTime? deadline, deadlineAcknowledged;
+  bool get hasPendingDeadline =>
+      amount > 0 && deadline != null && deadlineAcknowledged != deadline;
+  bool deadlineDue(DateTime now) =>
+      hasPendingDeadline && !deadline!.isAfter(now);
+  final bool isReceivable;
   final int? id;
   final String name;
   final int amount;
@@ -353,9 +362,14 @@ class Debt {
   final DateTime? createdAt;
   factory Debt.fromMap(Map<String, Object?> row) => Debt(
     id: row['id'] as int,
+    isReceivable: row['is_receivable'] == 1,
     name: row['name'] as String,
     amount: row['amount'] as int,
     currency: Currency.values.byName(row['currency'] as String),
     createdAt: DateTime.tryParse(row['created_at'] as String? ?? ''),
+    deadline: DateTime.tryParse(row['deadline'] as String? ?? ''),
+    deadlineAcknowledged: DateTime.tryParse(
+      row['deadline_acknowledged'] as String? ?? '',
+    ),
   );
 }

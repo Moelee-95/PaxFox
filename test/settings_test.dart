@@ -18,6 +18,38 @@ void main() {
     await store.db.close();
     store.dispose();
   });
+
+  testWidgets('notification switch applies immediately and survives refresh', (
+    tester,
+  ) async {
+    expect(store.notificationsEnabled, isTrue);
+    await tester.pumpWidget(MaterialApp(home: SettingsScreen(store: store)));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.widgetWithText(SwitchListTile, 'Payment reminder notifications'),
+    );
+    await tester.runAsync(() async {
+      for (var i = 0; i < 50 && store.notificationsEnabled; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+    });
+    await tester.pumpAndSettle();
+    expect(store.notificationsEnabled, isFalse);
+    await tester.runAsync(() => store.refresh());
+    expect(store.notificationsEnabled, isFalse);
+    expect(
+      (tester.widget<SwitchListTile>(find.byType(SwitchListTile))).value,
+      isFalse,
+    );
+    await tester.tap(find.byType(SwitchListTile));
+    await tester.runAsync(() async {
+      for (var i = 0; i < 50 && !store.notificationsEnabled; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+    });
+    await tester.pumpAndSettle();
+    expect(store.notificationsEnabled, isTrue);
+  });
   test(
     'timeout defaults, validates limits and reloads persisted values',
     () async {
@@ -112,6 +144,7 @@ void main() {
       'synthetic-key-entered-in-settings',
     );
     await tester.ensureVisible(find.text('Save settings'));
+    await tester.ensureVisible(find.text('Save settings'));
     await tester.tap(find.text('Save settings'));
     await tester.runAsync(() async {
       await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -126,10 +159,12 @@ void main() {
   ) async {
     await tester.pumpWidget(MaterialApp(home: SettingsScreen(store: store)));
     await tester.enterText(find.byType(TextFormField).first, '10');
+    await tester.ensureVisible(find.text('Save settings'));
     await tester.tap(find.text('Save settings'));
     await tester.pumpAndSettle();
     expect(find.text('Enter a whole number from 30 to 900.'), findsOneWidget);
     await tester.enterText(find.byType(TextFormField).first, '420');
+    await tester.ensureVisible(find.text('Save settings'));
     await tester.tap(find.text('Save settings'));
     await tester.runAsync(() async {
       await Future<void>.delayed(const Duration(milliseconds: 100));

@@ -220,6 +220,15 @@ void main() {
     );
     // Reconstruct the v11 CHECK constraints and remove v12 additions.
     await old.db.execute('PRAGMA foreign_keys = OFF');
+    // Remove current-only repayment objects before reconstructing a real v11 schema.
+    for (final trigger in await old.db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'debt_%'",
+    )) {
+      await old.db.execute('DROP TRIGGER "${trigger['name']}"');
+    }
+    await old.db.execute('DROP TABLE debt_payments');
+    await old.db.execute('DROP TABLE recurring_debts');
+
     for (final table in ['accounts', 'transactions']) {
       final sql =
           (await old.db.rawQuery(
@@ -250,7 +259,7 @@ void main() {
       factory: databaseFactoryFfi,
     );
     try {
-      expect(await migrated.db.getVersion(), 15);
+      expect(await migrated.db.getVersion(), 18);
       expect(migrated.currency, Currency.eur);
       expect(migrated.entries.single.id, entry.id);
       expect(migrated.entries.single.createdAt, entry.createdAt);

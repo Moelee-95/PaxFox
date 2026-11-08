@@ -156,7 +156,7 @@ void main() {
       await tester.tap(find.text('Loan'));
       await tester.pumpAndSettle();
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Lender / debt name'),
+        find.widgetWithText(TextFormField, 'Person / debt name'),
         'Unsaved',
       );
       expect(
@@ -165,7 +165,7 @@ void main() {
       );
       expect(
         tester.getCenter(find.text('Cancel')).dy,
-        tester.getCenter(find.text('Save debt')).dy,
+        tester.getCenter(find.text('Save')).dy,
       );
       await tester.tapAt(const Offset(5, 5));
       await tester.pumpAndSettle();

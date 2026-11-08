@@ -257,6 +257,8 @@ void main() {
       await tester.tap(find.byTooltip('Edit categories'));
       await tester.pumpAndSettle();
       expect(find.text('Categories'), findsOneWidget);
+      await tester.ensureVisible(find.byTooltip('Edit Groceries'));
+      await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Edit Groceries'));
       await tester.pumpAndSettle();
       await tester.enterText(

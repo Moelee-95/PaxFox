@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart' show Color;
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -22,6 +24,9 @@ class RecurringNotifications {
   final LedgerStore store;
   final plugin = FlutterLocalNotificationsPlugin();
   final message = ValueNotifier<String?>(null);
+  // Retained until the main navigator is ready, including terminated launches.
+  final occurrenceToOpen = ValueNotifier<int?>(null);
+  String? debtAction;
   bool _disposed = false;
   Future<void> _queue = Future.value();
   bool _syncRequested = false;
@@ -41,8 +46,31 @@ class RecurringNotifications {
           requestSoundPermission: false,
           notificationCategories: [
             DarwinNotificationCategory(
+              'debt_deadline',
+              actions: [
+                DarwinNotificationAction.plain(
+                  'keep',
+                  'Keep / edit',
+                  options: {DarwinNotificationActionOption.foreground},
+                ),
+                DarwinNotificationAction.plain(
+                  'pay',
+                  'Pay / receive',
+                  options: {DarwinNotificationActionOption.foreground},
+                ),
+              ],
+            ),
+            DarwinNotificationCategory(
               'payment',
               actions: [
+                DarwinNotificationAction.plain(
+                  'debt',
+                  'Add to debts / receivables',
+                  options: {
+                    DarwinNotificationActionOption.foreground,
+                    DarwinNotificationActionOption.destructive,
+                  },
+                ),
                 DarwinNotificationAction.plain(
                   'confirm',
                   'Confirm payment',
@@ -60,7 +88,9 @@ class RecurringNotifications {
     try {
       // Ask on startup, including before setup or any recurring rule exists.
       // Exact-alarm access is requested only when saving a manual reminder.
-      await requestPermissions(requestExactTiming: false);
+      if (store.notificationsEnabled) {
+        await requestPermissions(requestExactTiming: false);
+      }
     } catch (_) {
       message.value = 'Could not request notification permission. Enable notifications in your phone settings to receive payment reminders.';
     }
@@ -96,9 +126,35 @@ class RecurringNotifications {
   }
 
   Future<void> _respond(NotificationResponse response) async {
-    if (response.actionId != 'confirm' || response.payload == null) return;
+    if (response.payload == null) return;
+    final confirm = response.actionId == 'confirm';
+    final toDebt = response.actionId == 'debt';
+    if (!confirm &&
+        !toDebt &&
+        response.actionId != 'pay' &&
+        response.actionId != 'keep' &&
+        response.notificationResponseType !=
+            NotificationResponseType.selectedNotification) {
+      return;
+    }
     try {
       final payload = jsonDecode(response.payload!) as Map<String, dynamic>;
+      if (payload['debt'] is int) {
+        final debt = store.debts
+            .where(
+              (d) =>
+                  d.id == payload['debt'] &&
+                  d.hasPendingDeadline &&
+                  d.deadline!.toIso8601String() == payload['deadline'],
+            )
+            .firstOrNull;
+        if (debt == null) return;
+        debtAction = ['pay', 'keep'].contains(response.actionId)
+            ? response.actionId
+            : null;
+        occurrenceToOpen.value = -debt.id!;
+        return;
+      }
       await store.processRecurring();
       final occurrence = store.recurringOccurrences
           .where(
@@ -108,6 +164,19 @@ class RecurringNotifications {
           )
           .firstOrNull;
       if (occurrence == null || !occurrence.manual) return;
+      if (toDebt) {
+        await store.moveRecurringToDebt(occurrence.id);
+        message.value = occurrence.type == EntryType.income
+            ? 'Added to money owed to you.'
+            : 'Added to debts.';
+        if (response.id != null) await plugin.cancel(id: response.id!);
+        sync();
+        return;
+      }
+      if (!confirm) {
+        occurrenceToOpen.value = occurrence.id;
+        return;
+      }
       await store.retryRecurring(occurrence.id);
       final saved = store.recurringOccurrences.firstWhere(
         (o) => o.id == occurrence.id,
@@ -147,6 +216,11 @@ class RecurringNotifications {
   }
 
   Future<void> _sync() async {
+    if (!store.notificationsEnabled) {
+      await plugin.cancelAll();
+      _scheduledFingerprints.clear();
+      return;
+    }
     final info = await FlutterTimezone.getLocalTimezone();
     tz.setLocalLocation(tz.getLocation(info.identifier));
     final now = tz.TZDateTime.now(tz.local);
@@ -190,7 +264,38 @@ class RecurringNotifications {
     final exact =
         android == null ||
         await android.canScheduleExactNotifications() == true;
-    var futureCount = 0;
+    tz.TZDateTime debtTime(Debt debt) {
+      final d = debt.deadline!;
+      return tz.TZDateTime(tz.local, d.year, d.month, d.day, d.hour, d.minute);
+    }
+
+    final debtCandidates = store.debts
+        .where((d) => d.hasPendingDeadline)
+        .toList();
+    final futureRequests =
+        <({String key, tz.TZDateTime time})>[
+          for (final d in debtCandidates)
+            if (debtTime(d).isAfter(now)) (key: 'd${d.id}', time: debtTime(d)),
+          for (final c in candidates)
+            (
+              key: 'r${c.rule.id}_${dayKey(c.date)}',
+              time: tz.TZDateTime(
+                tz.local,
+                c.date.year,
+                c.date.month,
+                c.date.day,
+                c.rule.reminderMinutes ~/ 60,
+                c.rule.reminderMinutes % 60,
+              ),
+            ),
+        ].where((c) => c.time.isAfter(now)).toList()..sort(
+          (a, b) => a.time.compareTo(b.time),
+        );
+    final allowedFuture = futureRequests
+        .map((r) => r.key)
+        .toSet()
+        .take(60)
+        .toSet();
     for (final candidate in candidates) {
       final rule = candidate.rule;
       final date = candidate.date;
@@ -203,7 +308,9 @@ class RecurringNotifications {
         rule.reminderMinutes % 60,
       );
       final future = time.isAfter(now);
-      if (future && futureCount++ >= 60) continue;
+      if (future && !allowedFuture.contains('r${rule.id}_${dayKey(date)}')) {
+        continue;
+      }
       if (!future && !candidate.pending) continue;
       final key = dayKey(date);
       await store.db.insert('recurring_reminders', {
@@ -230,6 +337,15 @@ class RecurringNotifications {
           autoCancel: false,
           onlyAlertOnce: true,
           actions: [
+            AndroidNotificationAction(
+              'debt',
+              rule.type == EntryType.income
+                  ? 'Add to receivables'
+                  : 'Add to debts',
+              titleColor: const Color(0xffce3541),
+              showsUserInterface: true,
+              cancelNotification: false,
+            ),
             const AndroidNotificationAction(
               'confirm',
               'Confirm payment',
@@ -262,6 +378,81 @@ class RecurringNotifications {
       }
       if (future) {
         // Rescheduling the same ID updates changes to time, amount, and time zone.
+        await plugin.zonedSchedule(
+          id: id,
+          title: title,
+          body: body,
+          scheduledDate: time,
+          notificationDetails: details,
+          payload: payload,
+          androidScheduleMode: exact
+              ? AndroidScheduleMode.exactAllowWhileIdle
+              : AndroidScheduleMode.inexactAllowWhileIdle,
+        );
+      } else {
+        await plugin.show(
+          id: id,
+          title: title,
+          body: body,
+          notificationDetails: details,
+          payload: payload,
+        );
+      }
+      _scheduledFingerprints[id] = fingerprint;
+    }
+    for (final debt in debtCandidates) {
+      final id = -debt.id!;
+      final time = debtTime(debt);
+      final future = time.isAfter(now);
+      if (future && !allowedFuture.contains('d${debt.id}')) continue;
+      wanted.add(id);
+      final payload = jsonEncode({
+        'debt': debt.id,
+        'deadline': debt.deadline!.toIso8601String(),
+      });
+      final title = debt.isReceivable
+          ? 'Receivable due: ${debt.name}'
+          : 'Debt due: ${debt.name}';
+      final body =
+          '${debt.currency.display(debt.amount)} - pay/receive or keep and edit.';
+      final fingerprint =
+          '$title|$body|${time.toIso8601String()}|${info.identifier}|$exact';
+      if (_scheduledFingerprints[id] == fingerprint &&
+          (future
+              ? scheduled.any((r) => r.id == id)
+              : activeNotifications.any((n) => n.id == id))) {
+        continue;
+      }
+      final details = NotificationDetails(
+        android: AndroidNotificationDetails(
+          'debt_deadlines',
+          'Debt deadlines',
+          importance: Importance.high,
+          priority: Priority.high,
+          ongoing: true,
+          autoCancel: false,
+          onlyAlertOnce: true,
+          actions: [
+            const AndroidNotificationAction(
+              'keep',
+              'Keep / edit',
+              showsUserInterface: true,
+              cancelNotification: false,
+            ),
+            AndroidNotificationAction(
+              'pay',
+              debt.isReceivable ? 'Receive payment' : 'Pay debt',
+              showsUserInterface: true,
+              cancelNotification: false,
+            ),
+          ],
+        ),
+        iOS: const DarwinNotificationDetails(
+          categoryIdentifier: 'debt_deadline',
+          threadIdentifier: 'debt_deadlines',
+        ),
+      );
+      if (future) {
         await plugin.zonedSchedule(
           id: id,
           title: title,

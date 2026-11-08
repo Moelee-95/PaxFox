@@ -127,7 +127,7 @@ class _CategoryFormState extends State<CategoryForm> {
     );
     final field = TextFormField(
       controller: _name,
-      enabled: !_action.busy,
+      enabled: !_action.busy && widget.category?.isSystemDebt != true,
       maxLength: 80,
       textCapitalization: TextCapitalization.words,
       decoration: InputDecoration(

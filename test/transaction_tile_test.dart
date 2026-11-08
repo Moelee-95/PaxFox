@@ -9,6 +9,7 @@ import 'package:moneva/core/domain/category.dart';
 import 'package:moneva/core/domain/ledger.dart';
 import 'package:moneva/core/presentation/app_theme.dart';
 import 'package:moneva/core/presentation/transaction_tile.dart';
+import 'package:moneva/core/presentation/transaction_list.dart';
 
 void main() {
   final previewKey = GlobalKey();
@@ -52,6 +53,139 @@ void main() {
     category: 'Groceries',
     createdAt: DateTime.utc(2026, 10, 31, 9, 30),
   );
+
+  testWidgets(
+    'invoice outline shares one heading, keeps item actions and respects visible results',
+    (tester) async {
+      tester.view.physicalSize = const Size(430, 932);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      LedgerEntry item(int id, String title) => LedgerEntry(
+        id: id,
+        type: EntryType.expense,
+        amount: 1250,
+        currency: Currency.eur,
+        date: DateTime(2026, 11, 8),
+        description: title,
+        category: 'Groceries',
+        createdAt: DateTime.utc(2026, 11, 8, 10, 30),
+      );
+      final items = [
+        item(1, 'Milk and bread'),
+        item(2, 'Coffee with friends'),
+        item(3, 'Fresh vegetables'),
+      ];
+      int? tapped, held;
+      Widget app(List<LedgerEntry> visible) => RepaintBoundary(
+        key: previewKey,
+        child: MaterialApp(
+          theme: AppTheme.light,
+          darkTheme: AppTheme.dark,
+          debugShowCheckedModeBanner: false,
+          home: Scaffold(
+            appBar: AppBar(title: const Text('Expenses')),
+            body: CustomScrollView(
+              slivers: [
+                SliverPadding(
+                  padding: const EdgeInsets.all(16),
+                  sliver: SliverTransactionList(
+                    entries: visible,
+                    invoiceGroups: const {
+                      1: (id: 7, label: 'Invoice #7 - ALDI SUD'),
+                      3: (id: 7, label: 'Invoice #7 - ALDI SUD'),
+                    },
+                    emptyMessage: 'Empty',
+                    tileBuilder: (e) => TransactionTile(
+                      entry: e,
+                      compact: true,
+                      onTap: () => tapped = e.id,
+                      onLongPress: () => held = e.id,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpWidget(app(items));
+      await tester.pumpAndSettle();
+      expect(find.text('Invoice #7 - ALDI SUD'), findsOneWidget);
+      expect(find.text('2 items'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.text('Fresh vegetables')).dy,
+        lessThan(tester.getTopLeft(find.text('Coffee with friends')).dy),
+      );
+      await tester.tap(find.text('Fresh vegetables'));
+      await tester.longPress(find.text('Milk and bread'));
+      expect(tapped, 3);
+      expect(held, 1);
+      await capture(tester, 'invoice-outline-light');
+      tester.binding.platformDispatcher.platformBrightnessTestValue =
+          Brightness.dark;
+      addTearDown(
+        tester.binding.platformDispatcher.clearPlatformBrightnessTestValue,
+      );
+      await tester.pumpAndSettle();
+      await capture(tester, 'invoice-outline-dark');
+      tester.view.physicalSize = const Size(320, 740);
+      tester.binding.platformDispatcher.textScaleFactorTestValue = 1.8;
+      addTearDown(
+        tester.binding.platformDispatcher.clearTextScaleFactorTestValue,
+      );
+      await tester.pumpAndSettle();
+      await capture(tester, 'invoice-outline-large-text');
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(app([items.last]));
+      await tester.pumpAndSettle();
+      expect(find.text('1 item'), findsOneWidget);
+      expect(find.text('Milk and bread'), findsNothing);
+      expect(find.text('Invoice #7 - ALDI SUD'), findsOneWidget);
+    },
+  );
+
+  testWidgets('large invoice groups retain lazy item building', (tester) async {
+    var built = 0;
+    final entries = [
+      for (var id = 0; id < 1000; id++)
+        LedgerEntry(
+          id: id,
+          type: EntryType.expense,
+          amount: 100,
+          currency: Currency.eur,
+          date: DateTime(2026, 11, 8),
+          description: 'Item $id',
+          category: 'Groceries',
+        ),
+    ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CustomScrollView(
+            slivers: [
+              SliverTransactionList(
+                entries: entries,
+                invoiceGroups: {
+                  for (var id = 0; id < 1000; id++)
+                    id: (id: 1, label: 'Invoice #1 - Shop'),
+                },
+                emptyMessage: 'Empty',
+                tileBuilder: (e) {
+                  built++;
+                  return SizedBox(height: 70, child: Text(e.description));
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(built, lessThan(30));
+    expect(find.text('Invoice #1 - Shop'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'category badge keeps its color while prices show direction; actions stay connected',
@@ -103,8 +237,9 @@ void main() {
         final title = tester.widget<Text>(find.text('Weekly shopping'));
         expect(title.style!.fontWeight, FontWeight.w700);
         expect(title.style!.fontSize, 16);
-        expect(find.textContaining('Added on '), findsOneWidget);
-        expect(find.textContaining('Date: 2026-10-31'), findsOneWidget);
+        expect(find.byTooltip('Added on'), findsOneWidget);
+        expect(find.byIcon(Icons.history_outlined), findsOneWidget);
+        expect(find.text('2026-10-31'), findsOneWidget);
         expect(
           find.byKey(const ValueKey('transaction-created-info')),
           findsNothing,

@@ -381,7 +381,7 @@ class _SetupScreenState extends State<SetupScreen> {
                 for (var i = 0; i < debts.length; i++)
                   ListTile(
                     title: Text(debts[i].name),
-                    subtitle: Text(currency.display(debts[i].amount)),
+                    subtitle: Text(debts[i].currency.display(debts[i].amount)),
                     trailing: IconButton(
                       tooltip: 'Remove debt',
                       icon: const Icon(Icons.close),

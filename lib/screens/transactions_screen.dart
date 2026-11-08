@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/domain/ledger.dart';
+import '../core/presentation/transaction_list.dart';
 import '../core/presentation/entry_type_picker.dart';
 
 class TransactionsScreen extends StatefulWidget {
@@ -12,6 +13,7 @@ class TransactionsScreen extends StatefulWidget {
     required this.onSearchChanged,
     required this.onTypeChanged,
     required this.tileBuilder,
+    this.invoiceGroups = const {},
   });
 
   final List<LedgerEntry> entries;
@@ -20,6 +22,7 @@ class TransactionsScreen extends StatefulWidget {
   final ValueChanged<String> onSearchChanged;
   final ValueChanged<EntryType?> onTypeChanged;
   final Widget Function(LedgerEntry) tileBuilder;
+  final Map<int, InvoiceGroupInfo> invoiceGroups;
 
   @override
   State<TransactionsScreen> createState() => _TransactionsScreenState();
@@ -58,17 +61,20 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
             ],
           ),
         ),
-        if (widget.entries.isEmpty)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Text('No matching transactions.'),
-          ),
         Expanded(
-          child: ListView.builder(
+          child: CustomScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
-            itemCount: widget.entries.length,
-            itemBuilder: (_, index) =>
-                widget.tileBuilder(widget.entries[index]),
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                sliver: SliverTransactionList(
+                  entries: widget.entries,
+                  tileBuilder: widget.tileBuilder,
+                  invoiceGroups: widget.invoiceGroups,
+                  emptyMessage: 'No matching transactions.',
+                ),
+              ),
+            ],
           ),
         ),
       ],

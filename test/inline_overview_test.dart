@@ -206,7 +206,7 @@ void main() {
       );
       expect(
         tester.widget<Card>(debtCard).color,
-        Theme.of(tester.element(debtCard)).colorScheme.errorContainer,
+        const Color(0xffce3541).withValues(alpha: .035),
       );
       await tester.tap(find.byTooltip('Edit $longName'));
       await tester.pumpAndSettle();

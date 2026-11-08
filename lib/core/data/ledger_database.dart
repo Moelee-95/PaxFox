@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -19,7 +20,7 @@ class LedgerDatabase {
     final db = await (factory ?? databaseFactorySqflitePlugin).openDatabase(
       location,
       options: OpenDatabaseOptions(
-        version: 15,
+        version: 18,
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) {
             await db.execute(
@@ -61,6 +62,9 @@ class LedgerDatabase {
           }
           if (oldVersion < 14) await _addForeignCurrencyAccounts(db);
           if (oldVersion < 15) await _addRecurringSchedules(db);
+          if (oldVersion < 16) await _addDebtWorkflow(db);
+          if (oldVersion < 17) await _addNativeDebts(db);
+          if (oldVersion < 18) await _addDebtDeadlines(db);
         },
         // Table rebuild in v12 preserves dependent receipt/history links.
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = OFF'),
@@ -98,10 +102,125 @@ class LedgerDatabase {
           await _addCategoryColors(db);
           await _addForeignCurrencyAccounts(db);
           await _addRecurringSchedules(db);
+          await _addDebtWorkflow(db);
+          await _addNativeDebts(db);
+          await _addDebtDeadlines(db);
         },
       ),
     );
     return db;
+  }
+
+  static Future<void> _addDebtDeadlines(DatabaseExecutor db) async {
+    final columns = await db.rawQuery('PRAGMA table_info(debts)');
+    for (final name in ['deadline', 'deadline_acknowledged']) {
+      if (!columns.any((c) => c['name'] == name)) {
+        await db.execute('ALTER TABLE debts ADD COLUMN $name TEXT');
+      }
+    }
+  }
+
+  static Future<void> _addNativeDebts(DatabaseExecutor db) async {
+    final columns = await db.rawQuery('PRAGMA table_info(debt_payments)');
+    if (!columns.any((c) => c['name'] == 'details')) {
+      await db.execute('ALTER TABLE debt_payments ADD COLUMN details TEXT');
+    }
+    if (!columns.any((c) => c['name'] == 'fee_transaction_id')) {
+      await db.execute(
+        'ALTER TABLE debt_payments ADD COLUMN fee_transaction_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL',
+      );
+    }
+    await db.execute('DROP TRIGGER IF EXISTS debt_payment_validate');
+    await db.execute("""CREATE TRIGGER debt_payment_validate BEFORE INSERT ON debt_payments BEGIN
+      SELECT CASE WHEN NEW.debt_id IS NULL OR NOT EXISTS (
+        SELECT 1 FROM debts d JOIN transactions t ON t.id = NEW.transaction_id
+        WHERE d.id = NEW.debt_id AND d.amount >= NEW.amount
+          AND (NEW.details IS NOT NULL OR (t.amount = NEW.amount AND t.currency = d.currency))
+          AND lower(t.category) = 'debt'
+          AND t.type = CASE WHEN d.is_receivable = 1 THEN 'income' ELSE 'expense' END
+      ) THEN RAISE(ABORT, 'Invalid debt settlement or amount exceeds remaining balance.') END;
+    END""");
+    await db.execute('DROP TRIGGER IF EXISTS debt_transaction_change');
+    await db.execute("""CREATE TRIGGER debt_transaction_change AFTER UPDATE OF amount,type,category,currency ON transactions
+      WHEN EXISTS(SELECT 1 FROM debt_payments WHERE transaction_id = NEW.id AND debt_id IS NOT NULL) BEGIN
+      SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM debt_payments p JOIN debts d ON d.id = p.debt_id WHERE p.transaction_id = NEW.id
+          AND (p.details IS NOT NULL OR NEW.currency = d.currency) AND lower(NEW.category) = 'debt'
+          AND NEW.type = CASE WHEN d.is_receivable = 1 THEN 'income' ELSE 'expense' END
+      ) THEN RAISE(ABORT, 'Keep the Debt category and settlement type for this payment.') END;
+      UPDATE debt_payments SET amount = NEW.amount WHERE transaction_id = NEW.id AND details IS NULL AND amount != NEW.amount;
+    END""");
+    // Known user-entered bank rates are suitable initial defaults; never invent market rates.
+    final rates = <String, String>{};
+    for (final row in await db.query('accounts')) {
+      final base = row['base_currency'] ?? row['currency'];
+      if (base != row['currency']) {
+        rates.putIfAbsent(
+          '${base}_${row['currency']}',
+          () => row['exchange_rate'] as String? ?? '1',
+        );
+      }
+    }
+    await db.insert('settings', {
+      'key': 'currency_exchange_rates',
+      'value': jsonEncode(rates),
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+
+  static Future<void> _addDebtWorkflow(DatabaseExecutor db) async {
+    final columns = await db.rawQuery('PRAGMA table_info(debts)');
+    if (!columns.any((c) => c['name'] == 'is_receivable')) {
+      await db.execute(
+        'ALTER TABLE debts ADD COLUMN is_receivable INTEGER NOT NULL DEFAULT 0 CHECK(is_receivable IN (0,1))',
+      );
+    }
+    for (final kind in ['expense', 'income']) {
+      await db.execute(
+        "INSERT OR IGNORE INTO categories(kind,name,icon,color) VALUES (?, 'Debt', 'loan', 4286279167)",
+        [kind],
+      );
+    }
+    await db.execute(
+      "CREATE TRIGGER IF NOT EXISTS protect_debt_category_delete BEFORE DELETE ON categories WHEN lower(OLD.name) = 'debt' BEGIN SELECT RAISE(ABORT, 'The built-in Debt category cannot be deleted.'); END",
+    );
+    await db.execute(
+      "CREATE TRIGGER IF NOT EXISTS protect_debt_category_name BEFORE UPDATE OF name,kind ON categories WHEN lower(OLD.name) = 'debt' AND (NEW.name != OLD.name OR NEW.kind != OLD.kind) BEGIN SELECT RAISE(ABORT, 'The built-in Debt category cannot be renamed.'); END",
+    );
+    await db.execute(
+      'CREATE TABLE IF NOT EXISTS debt_payments(transaction_id INTEGER PRIMARY KEY REFERENCES transactions(id) ON DELETE CASCADE, debt_id INTEGER REFERENCES debts(id) ON DELETE SET NULL, amount INTEGER NOT NULL CHECK(amount > 0))',
+    );
+    await db.execute(
+      'CREATE TABLE IF NOT EXISTS recurring_debts(occurrence_id INTEGER PRIMARY KEY REFERENCES recurring_occurrences(id), debt_id INTEGER REFERENCES debts(id) ON DELETE SET NULL)',
+    );
+    await db.execute("""CREATE TRIGGER IF NOT EXISTS debt_payment_validate BEFORE INSERT ON debt_payments BEGIN
+      SELECT CASE WHEN NEW.debt_id IS NULL OR NOT EXISTS (
+        SELECT 1 FROM debts d JOIN transactions t ON t.id = NEW.transaction_id
+        WHERE d.id = NEW.debt_id AND d.amount >= NEW.amount AND t.amount = NEW.amount
+          AND t.currency = d.currency AND lower(t.category) = 'debt'
+          AND t.type = CASE WHEN d.is_receivable = 1 THEN 'income' ELSE 'expense' END
+      ) THEN RAISE(ABORT, 'Invalid debt settlement or amount exceeds remaining balance.') END;
+    END""");
+    await db.execute("""CREATE TRIGGER IF NOT EXISTS debt_payment_insert AFTER INSERT ON debt_payments BEGIN
+      UPDATE debts SET amount = amount - NEW.amount, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = NEW.debt_id;
+    END""");
+    await db.execute("""CREATE TRIGGER IF NOT EXISTS debt_payment_change_validate BEFORE UPDATE OF amount ON debt_payments WHEN NEW.debt_id IS NOT NULL BEGIN
+      SELECT CASE WHEN NEW.amount > (SELECT amount FROM debts WHERE id = NEW.debt_id) + OLD.amount THEN RAISE(ABORT, 'Amount exceeds remaining debt.') END;
+    END""");
+    await db.execute("""CREATE TRIGGER IF NOT EXISTS debt_payment_change AFTER UPDATE OF amount ON debt_payments WHEN NEW.debt_id IS NOT NULL BEGIN
+      UPDATE debts SET amount = amount + OLD.amount - NEW.amount, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = NEW.debt_id;
+    END""");
+    await db.execute("""CREATE TRIGGER IF NOT EXISTS debt_payment_delete AFTER DELETE ON debt_payments WHEN OLD.debt_id IS NOT NULL BEGIN
+      UPDATE debts SET amount = amount + OLD.amount, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = OLD.debt_id;
+    END""");
+    await db.execute("""CREATE TRIGGER IF NOT EXISTS debt_transaction_change AFTER UPDATE OF amount,type,category,currency ON transactions
+      WHEN EXISTS(SELECT 1 FROM debt_payments WHERE transaction_id = NEW.id AND debt_id IS NOT NULL) BEGIN
+      SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM debt_payments p JOIN debts d ON d.id = p.debt_id WHERE p.transaction_id = NEW.id
+          AND NEW.currency = d.currency AND lower(NEW.category) = 'debt'
+          AND NEW.type = CASE WHEN d.is_receivable = 1 THEN 'income' ELSE 'expense' END
+      ) THEN RAISE(ABORT, 'Keep the Debt category and settlement type for this payment.') END;
+      UPDATE debt_payments SET amount = NEW.amount WHERE transaction_id = NEW.id AND amount != NEW.amount;
+    END""");
   }
 
   static Future<void> _addRecurringSchedules(DatabaseExecutor db) async {

@@ -56,7 +56,7 @@ class AccountBalanceCard extends StatelessWidget {
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
             child: Text(
-              account.currency.display(balance),
+              account.reportingCurrency.display(account.toBase(balance)),
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                 color: balance < 0 ? Theme.of(context).colorScheme.error : null,
               ),
@@ -66,7 +66,7 @@ class AccountBalanceCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(
-                '${account.reportingCurrency.display(account.toBase(balance))} ? 1 ${account.reportingCurrency.code} = ${account.exchangeRate} ${account.currency.code}',
+                account.currency.display(balance),
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),

@@ -1,3 +1,5 @@
+import 'currency_exchange_screen.dart';
+
 import 'package:flutter/material.dart';
 
 import '../core/data/ledger_store.dart';
@@ -8,6 +10,9 @@ import '../core/presentation/responsive_pair.dart';
 import '../core/domain/ledger.dart';
 import '../core/presentation/debt_editor.dart';
 import 'accounts_screen.dart';
+import 'debt_settlement_form.dart';
+import '../core/presentation/debt_balance_card.dart';
+import '../core/presentation/app_sheet.dart';
 
 class OverviewScreen extends StatelessWidget {
   const OverviewScreen({
@@ -36,7 +41,7 @@ class OverviewScreen extends StatelessWidget {
             label: 'Account wealth',
             amount: store.currency.display(wealth),
             detail:
-                'Outstanding debts: ${store.currency.display(store.totalDebt)}',
+                'Debts: ${store.currency.display(store.totalDebt)} | Owed to you: ${store.currency.display(store.totalReceivable)}',
             icon: Icons.account_balance_outlined,
             color: colors.primary,
           ),
@@ -64,7 +69,8 @@ class OverviewScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final accounts = store.accounts;
-    final debts = store.debts;
+    final debts = store.debts.where((d) => !d.isReceivable).toList();
+    final receivables = store.debts.where((d) => d.isReceivable).toList();
     final balances = store.currentBalances.byAccount;
     return CustomScrollView(
       key: const PageStorageKey('account-overview'),
@@ -122,31 +128,8 @@ class OverviewScreen extends StatelessWidget {
             },
           ),
         ),
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
-          sliver: SliverToBoxAdapter(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Debts',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    color: theme.colorScheme.error,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                if (debts.isEmpty) const Text('No outstanding debts.'),
-              ],
-            ),
-          ),
-        ),
-        SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          sliver: SliverList.builder(
-            itemCount: debts.length,
-            itemBuilder: (context, index) => _debtCard(context, debts[index]),
-          ),
-        ),
+        ..._debtSection(context, debts, receivable: false),
+        ..._debtSection(context, receivables, receivable: true),
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
           sliver: SliverToBoxAdapter(
@@ -161,54 +144,103 @@ class OverviewScreen extends StatelessWidget {
     );
   }
 
-  Widget _debtCard(BuildContext context, Debt debt) {
-    final theme = Theme.of(context);
-    final foreground = theme.colorScheme.onErrorContainer;
-    return Card(
-      color: theme.colorScheme.errorContainer,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+  List<Widget> _debtSection(
+    BuildContext context,
+    List<Debt> items, {
+    required bool receivable,
+  }) => [
+    SliverPadding(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+      sliver: SliverToBoxAdapter(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
               children: [
-                Icon(Icons.account_balance_outlined, color: foreground),
-                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    debt.name,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: foreground,
-                    ),
+                    receivable ? 'Money owed to you' : 'Debts',
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
                 IconButton(
-                  tooltip: 'Edit debt ${debt.name}',
-                  visualDensity: VisualDensity.compact,
-                  onPressed: () => _editDebt(context, debt),
-                  icon: const Icon(Icons.edit_outlined),
+                  tooltip: receivable ? 'Add receivable' : 'Add debt',
+                  icon: const Icon(Icons.add),
+                  onPressed: () =>
+                      _editDebt(context, null, receivable: receivable),
                 ),
               ],
             ),
             Text(
-              store.currency.display(debt.amount),
-              style: theme.textTheme.headlineSmall?.copyWith(color: foreground),
+              store.currency.display(
+                receivable ? store.totalReceivable : store.totalDebt,
+              ),
+              style: Theme.of(context).textTheme.titleMedium,
             ),
+            if (items.any(
+              (d) => d.amount > 0 && store.debtMainAmount(d) == null,
+            ))
+              const Text(
+                'Totals exclude balances missing an exchange rate. Set a default in Settings.',
+              ),
+            if (items.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  receivable
+                      ? 'No money owed to you.'
+                      : 'No outstanding debts.',
+                ),
+              ),
           ],
         ),
       ),
-    );
-  }
+    ),
+    SliverPadding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      sliver: SliverList.builder(
+        itemCount: items.length,
+        itemBuilder: (context, index) => _debtCard(context, items[index]),
+      ),
+    ),
+  ];
 
-  Future<void> _editDebt(BuildContext context, Debt debt) => showDialog<void>(
+  Widget _debtCard(BuildContext context, Debt debt) => DebtBalanceCard(
+    debt: debt,
+    mainCurrency: store.currency,
+    mainAmount: store.debtMainAmount(debt),
+    onMissingRate: () => Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => CurrencyExchangeScreen(
+          store: store,
+          initialFrom: debt.currency,
+          initialTo: store.currency,
+        ),
+      ),
+    ),
+    onEdit: () => _editDebt(context, debt),
+    onSettle: () => showAppSheet<bool>(
+      context,
+      editor: true,
+      builder: (_) => DebtSettlementForm(store: store, debt: debt),
+    ),
+  );
+
+  Future<void> _editDebt(
+    BuildContext context,
+    Debt? debt, {
+    bool receivable = false,
+  }) => showDialog<void>(
     context: context,
     barrierDismissible: true,
     builder: (_) => DebtEditor(
       currency: store.currency,
       debt: debt,
+      lockIdentity: store.debtPaymentLinks.containsValue(debt?.id),
+      initialIsReceivable: receivable,
       onSave: store.saveDebt,
-      onDelete: () => store.deleteDebt(debt.id!),
+      onDelete: debt == null ? null : () => store.deleteDebt(debt.id!),
     ),
   );
 }

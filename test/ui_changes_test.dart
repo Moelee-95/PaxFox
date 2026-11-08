@@ -95,6 +95,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await preview(tester, 'navigation-capsule-light');
       await tester.tap(find.byTooltip('Add transaction'));
       await tester.pumpAndSettle();
       await preview(tester, 'add-expense-income-light');
@@ -210,7 +211,7 @@ void main() {
       await tester.tap(find.text('Add debt'));
       await tester.pumpAndSettle();
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Lender / debt name'),
+        find.widgetWithText(TextFormField, 'Person / debt name'),
         'Family loan',
       );
       await tester.enterText(
@@ -218,7 +219,7 @@ void main() {
         '20.001',
       );
       await preview(tester, 'setup-debt');
-      await tester.tap(find.text('Save debt'));
+      await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Finish setup'));
       await tester.tap(find.text('Finish setup'));

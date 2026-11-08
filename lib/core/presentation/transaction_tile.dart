@@ -16,11 +16,9 @@ class TransactionTile extends StatelessWidget {
     this.compact = false,
     this.selected = false,
     this.selectionMode = false,
-    this.invoiceLabel,
   });
 
   final LedgerEntry entry;
-  final String? invoiceLabel;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final CategoryIcon categoryIcon;
@@ -123,72 +121,91 @@ class TransactionTile extends StatelessWidget {
                             color: colors.onSurface,
                           ),
                         );
-                        // Measure the available text column once for both lines.
-                        final heading =
-                            constraints.maxWidth < 180 ||
-                                textScale > 1.3 ||
-                                amount.length > 14
-                            ? Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  description,
-                                  const SizedBox(height: 1),
-                                  price,
-                                ],
-                              )
-                            : Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Expanded(child: description),
-                                  const SizedBox(width: 6),
-                                  price,
-                                ],
-                              );
                         final metadataStyle = theme.textTheme.bodySmall
                             ?.copyWith(
                               fontSize: 12,
                               height: 1.3,
                               color: colors.onSurfaceVariant,
                             );
-                        // One paragraph wraps naturally and avoids laying out
-                        // a separate text render object for each date label.
-                        final metadata = Text(
-                          [
+                        final details = Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            description,
                             if (entry.createdAt != null)
-                              'Added on ${creationTimestamp(context, entry.createdAt!)}',
-                            'Date: ${dayKey(entry.date)}${entry.type == EntryType.refund ? ' \u00b7 Refund' : ''}',
-                          ].join('  \u00b7  '),
-                          style: metadataStyle,
+                              Padding(
+                                padding: const EdgeInsets.only(top: 3),
+                                child: Tooltip(
+                                  message: 'Added on',
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Icon(
+                                        Icons.history_outlined,
+                                        size: 13,
+                                        color: colors.onSurfaceVariant,
+                                        semanticLabel: 'Added on',
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: Text(
+                                          creationTimestamp(
+                                            context,
+                                            entry.createdAt!,
+                                          ),
+                                          style: metadataStyle,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                          ],
                         );
+                        final money = Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            price,
+                            const SizedBox(height: 3),
+                            Tooltip(
+                              message: 'Transaction date',
+                              child: Text(
+                                dayKey(entry.date),
+                                style: metadataStyle,
+                              ),
+                            ),
+                          ],
+                        );
+                        final heading =
+                            constraints.maxWidth < 230 ||
+                                textScale > 1.3 ||
+                                amount.length > 14
+                            ? Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  details,
+                                  const SizedBox(height: 4),
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: money,
+                                  ),
+                                ],
+                              )
+                            : Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(child: details),
+                                  const SizedBox(width: 8),
+                                  money,
+                                ],
+                              );
                         return Column(
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             heading,
-                            const SizedBox(height: 3),
-                            metadata,
-                            if (invoiceLabel != null)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 4),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.receipt_long_outlined,
-                                      size: 14,
-                                      color: colors.primary,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Expanded(
-                                      child: Text(
-                                        invoiceLabel!,
-                                        style: metadataStyle?.copyWith(
-                                          color: colors.primary,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
+                            if (entry.type == EntryType.refund)
+                              Text('Refund', style: metadataStyle),
                             if (entry.fx != null) ...[
                               const SizedBox(height: 2),
                               Text(

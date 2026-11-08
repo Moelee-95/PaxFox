@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
+
+import 'currency_exchange_screen.dart';
+
 import 'package:url_launcher/url_launcher.dart';
 
 import '../core/presentation/busy_label.dart';
 
 import '../core/data/ledger_store.dart';
+import '../core/data/recurring_notifications.dart';
 import '../core/presentation/async_action.dart';
 import '../core/presentation/info_button.dart';
 
@@ -28,6 +32,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late bool useManualKey = widget.store.geminiUseManualKey;
   bool showKey = false;
   late final action = AsyncAction()..addListener(() => setState(() {}));
+  late final notificationAction = AsyncAction()
+    ..addListener(() => setState(() {}));
+
+  Future<void> setNotifications(bool enabled) async {
+    await notificationAction.run(() async {
+      final reminders = RecurringNotifications.instance;
+      if (enabled &&
+          reminders != null &&
+          !await reminders.requestPermissions()) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Notification permission is disabled. Enable notifications for PaxFox in your phone settings, then try again.',
+              ),
+            ),
+          );
+        }
+        return;
+      }
+      await widget.store.saveNotificationsEnabled(enabled);
+      if (reminders != null) {
+        reminders.sync();
+        await reminders.settled;
+      }
+    }, failureMessage: 'Could not update notifications. Please retry.');
+  }
+
   bool get saving => action.busy;
   String? get error => action.error;
   @override
@@ -36,6 +68,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     sourceUrl.dispose();
     manualKey.dispose();
     action.dispose();
+    notificationAction.dispose();
     super.dispose();
   }
 
@@ -44,145 +77,191 @@ class _SettingsScreenState extends State<SettingsScreen> {
     appBar: AppBar(title: const Text('Settings')),
     body: Form(
       key: form,
-      child: ListView(
+      child: SingleChildScrollView(
         padding: EdgeInsets.fromLTRB(
           20,
           20,
           20,
           24 + MediaQuery.paddingOf(context).bottom,
         ),
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Invoice scanning',
-                  style: Theme.of(context).textTheme.titleLarge,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.currency_exchange),
+              title: const Text('Currency exchange defaults'),
+              subtitle: const Text(
+                'Rates for debts, receivables and settlements',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => CurrencyExchangeScreen(store: widget.store),
                 ),
               ),
-
-              InfoButton(
-                title: 'Invoice scanning settings',
-                message: '30–900 seconds (up to 15 minutes). Default: 180. Long invoices may need more time. This limit covers image preparation, connection and Gemini extraction. Changes apply to the next extraction. Cancel and Back remain available. Gemini does not report a completion percentage for this request. The scanner shows the current stage and elapsed time instead. A timeout is still needed if the connection stalls.',
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: timeout,
-            enabled: !saving,
-            decoration: const InputDecoration(
-              labelText: 'Extraction timeout (seconds)',
             ),
-            keyboardType: TextInputType.number,
-            validator: (s) {
-              final value = int.tryParse(s?.trim() ?? '');
-              return value == null || value < 30 || value > 900
-                  ? 'Enter a whole number from 30 to 900.'
-                  : null;
-            },
-          ),
-          const SizedBox(height: 20),
-          DropdownButtonFormField<bool>(
-            initialValue: useManualKey,
-            decoration: const InputDecoration(labelText: 'Gemini key source'),
-            items: const [
-              DropdownMenuItem(
-                value: false,
-                child: Text('Online encrypted JSON'),
-              ),
-              DropdownMenuItem(value: true, child: Text('Manual API key')),
-            ],
-            onChanged: saving
-                ? null
-                : (value) => setState(() => useManualKey = value!),
-          ),
-          const SizedBox(height: 16),
-          TextFormField(
-            controller: sourceUrl,
-            enabled: !saving && !useManualKey,
-            decoration: const InputDecoration(
-              labelText: 'Encrypted JSON source URL',
-            ),
-            keyboardType: TextInputType.url,
-            autocorrect: false,
-            validator: (value) => LedgerStore.validGeminiConfigUrl(value ?? '')
-                ? null
-                : 'Enter a valid HTTPS URL.',
-          ),
-          const SizedBox(height: 16),
-          TextFormField(
-            controller: manualKey,
-            enabled: !saving && useManualKey,
-            obscureText: !showKey,
-            autocorrect: false,
-            enableSuggestions: false,
-            decoration: InputDecoration(
-              labelText: 'Manual Gemini API key',
-              suffixIcon: IconButton(
-                tooltip: showKey ? 'Hide API key' : 'Show API key',
-                onPressed: saving
-                    ? null
-                    : () => setState(() => showKey = !showKey),
-                icon: Icon(showKey ? Icons.visibility_off : Icons.visibility),
-              ),
-            ),
-            validator: (value) =>
-                !useManualKey || LedgerStore.validGeminiKey(value ?? '')
-                ? null
-                : 'Enter a valid Gemini API key.',
-          ),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Saved locally on this device.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ),
-              const InfoButton(
-                title: 'Get a Gemini API key',
-                message:
-                    'Sign in to Google AI Studio and create an API key. '
-                    'Copy it, select Manual API key here, paste it into the '
-                    'key field, then save settings.',
-                details: _GeminiKeyHelpLinks(),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          if (error != null)
+            const SizedBox(height: 24),
             Text(
-              error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
+              'Notifications',
+              style: Theme.of(context).textTheme.titleLarge,
             ),
-          const SizedBox(height: 24),
-          FilledButton(
-            onPressed: saving
-                ? null
-                : () async {
-                    if (!form.currentState!.validate()) {
-                      return;
-                    }
-                    final saved = await action.run(
-                      () => widget.store.saveInvoiceSettings(
-                        seconds: int.parse(timeout.text.trim()),
-                        configUrl: sourceUrl.text,
-                        useManualKey: useManualKey,
-                        manualKey: manualKey.text,
-                      ),
-                      failureMessage: 'Could not save settings. Please retry.',
-                    );
-                    if (saved && context.mounted) {
-                      Navigator.pop(context);
-                    }
-                  },
-            child: BusyLabel(
-              busy: saving,
-              label: saving ? 'Saving...' : 'Save settings',
+            ListenableBuilder(
+              listenable: widget.store,
+              builder: (context, _) => SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Payment reminder notifications'),
+                subtitle: const Text(
+                  'Show phone reminders for manual recurring payments and debt deadlines. Changes apply immediately.',
+                ),
+                value: widget.store.notificationsEnabled,
+                onChanged: notificationAction.busy ? null : setNotifications,
+              ),
             ),
-          ),
-        ],
+            const Text(
+              'Turning this off removes phone reminders. Pending payments and the notification bell inside PaxFox remain available.',
+            ),
+            if (notificationAction.error != null)
+              Text(
+                notificationAction.error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Invoice scanning',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+
+                InfoButton(
+                  title: 'Invoice scanning settings',
+                  message: '30–900 seconds (up to 15 minutes). Default: 180. Long invoices may need more time. This limit covers image preparation, connection and Gemini extraction. Changes apply to the next extraction. Cancel and Back remain available. Gemini does not report a completion percentage for this request. The scanner shows the current stage and elapsed time instead. A timeout is still needed if the connection stalls.',
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: timeout,
+              enabled: !saving,
+              decoration: const InputDecoration(
+                labelText: 'Extraction timeout (seconds)',
+              ),
+              keyboardType: TextInputType.number,
+              validator: (s) {
+                final value = int.tryParse(s?.trim() ?? '');
+                return value == null || value < 30 || value > 900
+                    ? 'Enter a whole number from 30 to 900.'
+                    : null;
+              },
+            ),
+            const SizedBox(height: 20),
+            DropdownButtonFormField<bool>(
+              initialValue: useManualKey,
+              decoration: const InputDecoration(labelText: 'Gemini key source'),
+              items: const [
+                DropdownMenuItem(
+                  value: false,
+                  child: Text('Online encrypted JSON'),
+                ),
+                DropdownMenuItem(value: true, child: Text('Manual API key')),
+              ],
+              onChanged: saving
+                  ? null
+                  : (value) => setState(() => useManualKey = value!),
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: sourceUrl,
+              enabled: !saving && !useManualKey,
+              decoration: const InputDecoration(
+                labelText: 'Encrypted JSON source URL',
+              ),
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              validator: (value) =>
+                  LedgerStore.validGeminiConfigUrl(value ?? '')
+                  ? null
+                  : 'Enter a valid HTTPS URL.',
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: manualKey,
+              enabled: !saving && useManualKey,
+              obscureText: !showKey,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: InputDecoration(
+                labelText: 'Manual Gemini API key',
+                suffixIcon: IconButton(
+                  tooltip: showKey ? 'Hide API key' : 'Show API key',
+                  onPressed: saving
+                      ? null
+                      : () => setState(() => showKey = !showKey),
+                  icon: Icon(showKey ? Icons.visibility_off : Icons.visibility),
+                ),
+              ),
+              validator: (value) =>
+                  !useManualKey || LedgerStore.validGeminiKey(value ?? '')
+                  ? null
+                  : 'Enter a valid Gemini API key.',
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Saved locally on this device.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+                const InfoButton(
+                  title: 'Get a Gemini API key',
+                  message:
+                      'Sign in to Google AI Studio and create an API key. '
+                      'Copy it, select Manual API key here, paste it into the '
+                      'key field, then save settings.',
+                  details: _GeminiKeyHelpLinks(),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (error != null)
+              Text(
+                error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            const SizedBox(height: 24),
+            FilledButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      if (!form.currentState!.validate()) {
+                        return;
+                      }
+                      final saved = await action.run(
+                        () => widget.store.saveInvoiceSettings(
+                          seconds: int.parse(timeout.text.trim()),
+                          configUrl: sourceUrl.text,
+                          useManualKey: useManualKey,
+                          manualKey: manualKey.text,
+                        ),
+                        failureMessage:
+                            'Could not save settings. Please retry.',
+                      );
+                      if (saved && context.mounted) {
+                        Navigator.pop(context);
+                      }
+                    },
+              child: BusyLabel(
+                busy: saving,
+                label: saving ? 'Saving...' : 'Save settings',
+              ),
+            ),
+          ],
+        ),
       ),
     ),
   );
