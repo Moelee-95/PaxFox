@@ -113,6 +113,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Invoice #7 - ALDI SUD'), findsOneWidget);
       expect(find.text('2 items'), findsOneWidget);
+      expect(find.text('Total ${Currency.eur.display(2500)}'), findsOneWidget);
       expect(
         tester.getTopLeft(find.text('Fresh vegetables')).dy,
         lessThan(tester.getTopLeft(find.text('Coffee with friends')).dy),
@@ -122,6 +123,16 @@ void main() {
       expect(tapped, 3);
       expect(held, 1);
       await capture(tester, 'invoice-outline-light');
+      await tester.tap(find.byKey(const ValueKey('invoice-header-7')));
+      await tester.pumpAndSettle();
+      expect(find.text('Milk and bread'), findsNothing);
+      expect(find.text('Fresh vegetables'), findsNothing);
+      expect(find.text('Coffee with friends'), findsOneWidget);
+      expect(find.text('Total ${Currency.eur.display(2500)}'), findsOneWidget);
+      await capture(tester, 'invoice-outline-collapsed-light');
+      await tester.tap(find.byKey(const ValueKey('invoice-header-7')));
+      await tester.pumpAndSettle();
+      expect(find.text('Fresh vegetables'), findsOneWidget);
       tester.binding.platformDispatcher.platformBrightnessTestValue =
           Brightness.dark;
       addTearDown(
@@ -140,8 +151,74 @@ void main() {
       await tester.pumpWidget(app([items.last]));
       await tester.pumpAndSettle();
       expect(find.text('1 item'), findsOneWidget);
+      expect(find.text('Total ${Currency.eur.display(1250)}'), findsOneWidget);
       expect(find.text('Milk and bread'), findsNothing);
       expect(find.text('Invoice #7 - ALDI SUD'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'invoice totals subtract refunds, separate currencies and refresh while collapsed',
+    (tester) async {
+      LedgerEntry item(int id, EntryType type, int amount, Currency currency) =>
+          LedgerEntry(
+            id: id,
+            type: type,
+            amount: amount,
+            currency: currency,
+            date: DateTime(2026, 11, 10),
+            description: 'Item $id',
+            category: 'Groceries',
+          );
+      final entries = [
+        item(1, EntryType.expense, 1000, Currency.eur),
+        item(2, EntryType.refund, 250, Currency.eur),
+        item(3, EntryType.income, 500, Currency.usd),
+      ];
+      Widget app(List<LedgerEntry> visible) => MaterialApp(
+        home: Scaffold(
+          body: CustomScrollView(
+            slivers: [
+              SliverTransactionList(
+                entries: visible,
+                invoiceGroups: const {
+                  1: (id: 4, label: 'Invoice #4 - Shop'),
+                  2: (id: 4, label: 'Invoice #4 - Shop'),
+                  3: (id: 4, label: 'Invoice #4 - Shop'),
+                },
+                emptyMessage: 'Empty',
+                tileBuilder: (e) => Text(e.description),
+              ),
+            ],
+          ),
+        ),
+      );
+      await tester.pumpWidget(app(entries));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(
+          'Total ${Currency.eur.display(750)} / ${Currency.usd.display(500)}',
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('invoice-header-4')));
+      await tester.pumpAndSettle();
+      expect(find.text('Item 1'), findsNothing);
+      await tester.pumpWidget(app([entries[2]]));
+      await tester.pumpAndSettle();
+      expect(find.text('Total ${Currency.usd.display(500)}'), findsOneWidget);
+      expect(find.text('1 item'), findsOneWidget);
+      expect(find.text('Item 3'), findsNothing);
+      await tester.pumpWidget(app([]));
+      await tester.pumpAndSettle();
+      expect(find.text('Empty'), findsOneWidget);
+      await tester.pumpWidget(app(entries));
+      await tester.pumpAndSettle();
+      expect(find.text('Item 1'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('invoice-header-4')));
+      await tester.pumpAndSettle();
+      expect(find.text('Item 1'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     },
   );
 
@@ -184,6 +261,16 @@ void main() {
     await tester.pumpAndSettle();
     expect(built, lessThan(30));
     expect(find.text('Invoice #1 - Shop'), findsOneWidget);
+    expect(find.text('Total ${Currency.eur.display(100000)}'), findsOneWidget);
+    built = 0;
+    await tester.tap(find.byKey(const ValueKey('invoice-header-1')));
+    await tester.pumpAndSettle();
+    expect(built, 0);
+    expect(find.text('Item 0'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('invoice-header-1')));
+    await tester.pumpAndSettle();
+    expect(built, lessThan(30));
+    expect(find.text('Item 0'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

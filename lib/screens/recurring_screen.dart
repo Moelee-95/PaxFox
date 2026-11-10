@@ -5,6 +5,7 @@ import '../core/presentation/busy_label.dart';
 import '../core/data/ledger_store.dart';
 import '../core/data/recurring_notifications.dart';
 import '../core/domain/ledger.dart';
+import '../core/domain/category.dart';
 import '../core/domain/recurring.dart';
 import '../core/presentation/async_action.dart';
 import '../core/presentation/confirmation_dialog.dart';
@@ -14,6 +15,7 @@ import '../core/presentation/app_sheet.dart';
 import '../core/presentation/info_button.dart';
 import '../core/presentation/ledger_refresh.dart';
 import '../core/presentation/responsive_pair.dart';
+import '../core/presentation/recurring_payment_card.dart';
 
 const _recurringInfo =
     'Automatic recurring entries are posted when you open or resume PaxFox. Manual entries wait for confirmation and can show reminders at your chosen local time. Missed due dates are kept separately. No bank connection: this updates your local ledger, not your real bank. Days 29-31 use the last day in shorter months. No weekend adjustment.';
@@ -44,6 +46,7 @@ class RecurringScreen extends StatefulWidget {
 }
 
 class _RecurringScreenState extends State<RecurringScreen> {
+  final _switchChanges = <int, bool>{};
   bool busy = false;
   String? error;
   Future<void> action(Future<void> Function() work) async {
@@ -68,6 +71,26 @@ class _RecurringScreenState extends State<RecurringScreen> {
       if (mounted) {
         setState(() => busy = false);
       }
+    }
+  }
+
+  Future<void> setActive(RecurringRule rule, bool value) async {
+    final id = rule.id!;
+    if (busy || _switchChanges.containsKey(id)) return;
+    setState(() {
+      _switchChanges[id] = value;
+      error = null;
+    });
+    try {
+      await widget.store.setRecurringActive(id, value);
+    } on ArgumentError catch (e) {
+      if (mounted) setState(() => error = '${e.message}');
+    } catch (_) {
+      if (mounted) {
+        setState(() => error = 'Could not update this payment. Please retry.');
+      }
+    } finally {
+      if (mounted) setState(() => _switchChanges.remove(id));
     }
   }
 
@@ -116,172 +139,152 @@ class _RecurringScreenState extends State<RecurringScreen> {
       store: widget.store,
       child: ListenableBuilder(
         listenable: widget.store,
-        builder: (context, _) => ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-          children: [
-            if (error != null)
+        builder: (context, _) {
+          final pendingDates = <int, DateTime>{};
+          for (final occurrence in widget.store.recurringOccurrences.where(
+            (o) => o.status == 'failed',
+          )) {
+            final previous = pendingDates[occurrence.ruleId];
+            if (previous == null || occurrence.date.isBefore(previous)) {
+              pendingDates[occurrence.ruleId] = occurrence.date;
+            }
+          }
+          final accounts = {
+            for (final account in widget.store.accounts) account.id: account,
+          };
+          return ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+            children: [
+              if (error != null)
+                Text(
+                  error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              if (widget.store.recurringRules.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text(
+                    'No recurring payments yet. Add rent, subscriptions, salary or another monthly entry.',
+                  ),
+                ),
+              for (final rule in widget.store.recurringRules)
+                AbsorbPointer(
+                  absorbing: _switchChanges.containsKey(rule.id),
+                  child: RecurringPaymentCard(
+                    rule: rule,
+                    activeValue: _switchChanges[rule.id],
+                    currency: rule.currency ?? widget.store.currency,
+                    accountName:
+                        accounts[rule.accountId]?.name ?? 'Account unavailable',
+                    categoryIcon:
+                        widget.store
+                            .categoryFor(rule.category, rule.type)
+                            ?.icon ??
+                        CategoryIcon.general,
+                    categoryColor: widget.store
+                        .categoryFor(rule.category, rule.type)
+                        ?.color,
+                    pendingDate: pendingDates[rule.id],
+                    onEdit: busy ? null : () => edit(rule),
+                    onDelete: busy ? null : () => remove(rule),
+                    onActiveChanged: busy
+                        ? null
+                        : (value) => setActive(rule, value),
+                  ),
+                ),
+              const SizedBox(height: 16),
               Text(
-                error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+                'History & pending entries',
+                style: Theme.of(context).textTheme.titleLarge,
               ),
-            if (widget.store.recurringRules.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(24),
-                child: Text(
-                  'No recurring payments yet. Add rent, subscriptions, salary or another monthly entry.',
-                ),
-              ),
-            for (final rule in widget.store.recurringRules)
-              Card(
-                child: Column(
-                  children: [
-                    ListTile(
-                      onTap: busy ? null : () => edit(rule),
-                      title: Text(rule.description),
-                      leading: Icon(
-                        rule.type == EntryType.income
-                            ? Icons.payments_outlined
-                            : Icons.receipt_long_outlined,
-                        color: rule.type == EntryType.income
-                            ? Colors.green
-                            : Colors.red,
-                      ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '${rule.type == EntryType.income ? 'Income' : 'Expense'} - ${(rule.currency ?? widget.store.currency).display(rule.amount)} - ${widget.store.accounts.where((a) => a.id == rule.accountId).firstOrNull?.name ?? 'Account unavailable'}',
-                          ),
-                          Text(
-                            '${rule.active ? 'Next' : 'Paused; scheduled'}: ${dayKey(rule.nextDate)} - ${rule.scheduleLabel}${rule.automatic ? ' - automatic' : ' - confirm manually'}',
-                            style: TextStyle(
-                              color: rule.active ? Colors.blue : Colors.orange,
-                            ),
-                          ),
-                        ],
-                      ),
-                      isThreeLine: true,
-                      trailing: const Icon(Icons.edit_outlined),
-                    ),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        IconButton(
-                          tooltip: rule.active ? 'Pause' : 'Resume',
-                          onPressed: busy
-                              ? null
-                              : () => action(
-                                  () => widget.store.setRecurringActive(
-                                    rule.id!,
-                                    !rule.active,
-                                  ),
-                                ),
-                          icon: Icon(
-                            rule.active
-                                ? Icons.pause_outlined
-                                : Icons.play_arrow_outlined,
-                          ),
+              for (final occurrence in widget.store.recurringOccurrences.take(
+                100,
+              ))
+                Card(
+                  child: Column(
+                    children: [
+                      ListTile(
+                        title: Text(
+                          '${occurrence.description} - ${(occurrence.currency ?? widget.store.currency).display(occurrence.amount)}',
                         ),
-                        IconButton(
-                          tooltip: 'Delete recurring rule',
-                          onPressed: busy ? null : () => remove(rule),
-                          icon: const Icon(Icons.delete_outline),
+                        subtitle: Text(
+                          '${occurrence.type.name} - ${dayKey(occurrence.date)} - ${_historyStatus(occurrence)}',
                         ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            const SizedBox(height: 16),
-            Text(
-              'History & pending entries',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            for (final occurrence in widget.store.recurringOccurrences.take(
-              100,
-            ))
-              Card(
-                child: Column(
-                  children: [
-                    ListTile(
-                      title: Text(
-                        '${occurrence.description} - ${(occurrence.currency ?? widget.store.currency).display(occurrence.amount)}',
                       ),
-                      subtitle: Text(
-                        '${occurrence.type.name} - ${dayKey(occurrence.date)} - ${_historyStatus(occurrence)}',
-                      ),
-                    ),
-                    if (occurrence.status == 'failed')
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            TextButton(
-                              onPressed: busy
-                                  ? null
-                                  : () => action(
-                                      () => widget.store.retryRecurring(
-                                        occurrence.id,
-                                      ),
-                                    ),
-                              child: Text(
-                                occurrence.manual
-                                    ? 'Confirm payment'
-                                    : 'Retry posting',
-                              ),
-                            ),
-                            if (!occurrence.manual)
+                      if (occurrence.status == 'failed')
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
                               TextButton(
                                 onPressed: busy
                                     ? null
-                                    : () async {
-                                        final yes = await showDialog<bool>(
-                                          context: context,
-                                          builder: (context) => AlertDialog(
-                                            title: const Text(
-                                              'Skip this unpaid payment?',
-                                            ),
-                                            content: const Text(
-                                              'No transaction will be posted. Future scheduled payments are unchanged.',
-                                            ),
-                                            actions: [
-                                              TextButton(
-                                                onPressed: () => Navigator.pop(
-                                                  context,
-                                                  false,
-                                                ),
-                                                child: const Text('Cancel'),
+                                    : () => action(
+                                        () => widget.store.retryRecurring(
+                                          occurrence.id,
+                                        ),
+                                      ),
+                                child: Text(
+                                  occurrence.manual
+                                      ? 'Confirm payment'
+                                      : 'Retry posting',
+                                ),
+                              ),
+                              if (!occurrence.manual)
+                                TextButton(
+                                  onPressed: busy
+                                      ? null
+                                      : () async {
+                                          final yes = await showDialog<bool>(
+                                            context: context,
+                                            builder: (context) => AlertDialog(
+                                              title: const Text(
+                                                'Skip this unpaid payment?',
                                               ),
-                                              FilledButton(
-                                                onPressed: () => Navigator.pop(
-                                                  context,
-                                                  true,
-                                                ),
-                                                child: const Text('Skip'),
+                                              content: const Text(
+                                                'No transaction will be posted. Future scheduled payments are unchanged.',
                                               ),
-                                            ],
-                                          ),
-                                        );
-                                        if (yes == true) {
-                                          await action(
-                                            () => widget.store.skipRecurring(
-                                              occurrence.id,
+                                              actions: [
+                                                TextButton(
+                                                  onPressed: () =>
+                                                      Navigator.pop(
+                                                        context,
+                                                        false,
+                                                      ),
+                                                  child: const Text('Cancel'),
+                                                ),
+                                                FilledButton(
+                                                  onPressed: () =>
+                                                      Navigator.pop(
+                                                        context,
+                                                        true,
+                                                      ),
+                                                  child: const Text('Skip'),
+                                                ),
+                                              ],
                                             ),
                                           );
-                                        }
-                                      },
-                                child: const Text('Skip'),
-                              ),
-                          ],
+                                          if (yes == true) {
+                                            await action(
+                                              () => widget.store.skipRecurring(
+                                                occurrence.id,
+                                              ),
+                                            );
+                                          }
+                                        },
+                                  child: const Text('Skip'),
+                                ),
+                            ],
+                          ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-          ],
-        ),
+            ],
+          );
+        },
       ),
     ),
   );

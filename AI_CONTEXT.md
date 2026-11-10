@@ -29,13 +29,13 @@ More: editable local user card + searchable All transactions, Categories, Accoun
   Accounts -> AccountForm (unused banks can be deleted); Categories -> full-page add/edit, 21 color swatches + searchable grouped icons (including brands), pinned Save and header check
   Recurring -> daily/weekly/monthly/yearly schedules; automatic posting or manual reminders; history -> confirm/retry/skip
   CSV -> multi-select account cards and type bottom sheet; one nine-column file preserves mixed assignments and transfers; legacy five-column imports require one account/type
-Translucent floating + -> compact Expense / Income columns, each with Manual / Scan / Gallery / File icon buttons; close stays at + position
+Translucent floating + -> compact Expense / Income / Transfer choices. Expense or Income reveals its Manual / Scan / Gallery / File grid; Transfer opens its manual editor directly. Back returns from methods to choices; outside/close dismiss. Close stays at + position.
   Manual -> TransactionForm bottom sheet with colored category/type and amount header, preselected type and pinned Save
   Scan/upload -> camera, images or PDF -> preparation -> Extract -> expense/income review
   Review -> item edit bottom sheets -> atomic save -> matching Home expense/income tab
 Existing entry -> TransactionForm bottom sheet, except legacy single-expense receipts -> invoice review
 Long-press entries -> bulk category/account/delete actions
-Transaction lists group visible items from each scanned invoice inside one thin rounded outline with a shared invoice-number/merchant heading and visible-item count. Groups are anchored at their first matching entry; individual items retain edit/selection actions and lazy rendering.
+Transaction lists group visible items from each scanned invoice inside one thin rounded outline with a shared invoice-number/merchant heading, visible-item count and total. Tapping the header collapses/expands the items; collapsed invoices show only the header. Groups are anchored at their first matching entry; individual items retain edit/selection actions and lazy rendering.
 Transaction rows: rounded cards with the description in bold, saved category-color icon circle, a history-icon/localized creation timestamp below and an unprefixed transaction date beneath the price; no category-name heading or creation-time info button. Slightly larger 34px badges, 20px glyphs and 16px headings/prices. Expense price red with minus, income/refund green with plus, transfer blue without income/expense sign. Home expense/income tabs stay separate.
 ```
 
@@ -124,3 +124,34 @@ Optional debt valuation and deadlines (2026-11-08): schema **18** adds nullable 
 Deadline/optional-rate validation (2026-11-08): analyzer clean; 32 focused debt, exchange shortcut, persistence/migration, deadline scheduling and inbox-action tests pass. Full regression with two workers: 299 pass; only the previously known dark large-text category-picker ListTile layout test fails. Tests cover optional foreign setup debts, schema-17 upgrade/reopen, stale acknowledgement/action protection, native action deep-link intents, no money movement on Keep, full payment removal, and a shared 60-request notification cap. Physical notification delivery/action rendering and iOS builds remain unverified.
 
 Final schema-18 Android release APK builds successfully (63.9MB). Stop and restart the full Flutter run from lib/main.dart to apply the migration.
+
+
+Progressive creation menu (2026-11-09): + now shows three clear color-coded Expense/Income/Transfer rows. Expense/Income reveal only their own four labeled entry-method tiles; Transfer returns a manual creation request with transfer type to the existing editor. A 170ms size/fade/slide transition respects reduced-motion settings for submenu changes. Anchored close and outside taps dismiss either level; Back first returns from methods to choices. Labels remain visible at large text, with scrolling when vertical space is limited. No financial, persistence or schema change.
+
+Creation-menu validation (2026-11-09): analyzer clean; all 28 focused menu/layout/main-navigation checks pass, with the related income-document and clean-layout checks also passing. Light/dark and 320px/1.8x root/method panels were rendered and visually inspected. Direct Transfer routing, only-selected methods, system Back, outside/close dismissal, capture/gallery/file routing and existing month/navigation behavior are covered. No schema or financial-rule change.
+
+Progressive-menu Android release build passed (63.9MB).
+
+
+Invoice totals/collapse (2026-11-10): shared SliverTransactionList now displays each visible group's total alongside its existing invoice heading/count, preserving outline/colors and item actions. Totals use frozen reporting amounts, subtract refunds, and keep different currencies separate. Header taps toggle header-only collapsed rendering with accessible expanded state and a small animated chevron; default is expanded. Collapsed IDs survive snapshot/filter refreshes while the list remains mounted, including temporary empty filters. Stable invoice/entry keys preserve later rows when earlier groups collapse. Individual expanded rows remain lazy; collapsed groups build no item tiles, including 1,000-item invoices. No data/schema/financial write change.
+
+Invoice total/collapse validation (2026-11-10): analyzer clean; all 11 focused invoice-row, bulk-selection and inline-overview tests pass. Coverage includes net refund totals, separate currencies, filtered totals, header-only collapse/reopen, retained choices across data/empty-filter refreshes, item actions and 1,000-item lazy construction. Light/dark and 320px/1.8x previews inspected.
+
+Invoice total/collapse Android release build passed (63.9MB).
+
+
+Recurring card redesign (2026-11-10): RecurringPaymentCard is a shared stateless presentation component inspired by the supplied reference: rounded red expense/green income outlines with gentle tint, category-color/icon tile, prominent native input amount, readable schedule/account/posting mode, corner status badge and matching full-width due footer. Native Switch replaces pause/play icons and calls existing setRecurringActive; writes disable controls, card tap still edits and the small delete action remains. Badges/footer distinguish today/tomorrow/upcoming/overdue/paused/ended, using earliest unpaid occurrence when nextDate has already advanced. Narrow widths/large text stack amount and switch below details without shrinking money. Rules and financial behavior are unchanged; no schema change.
+
+Recurring-card validation (2026-11-10): analyzer clean; 37 focused recurring schedule/classification, card layout, account editor and main-widget checks pass. Native switch pause/resume/edit/delete behavior is verified, including disabled-control tap isolation; status tests cover pending dates after nextDate advances, paused and ended rules. Light/dark and 320px/1.8x previews inspected, with long native-currency amounts wrapping visibly.
+
+Recurring-card Android release build passed (63.9MB).
+
+Compact recurring-card refinement (2026-11-10): removed UPCOMING badges entirely (future cards have no badge row), reduced card radius to 16px, tightened padding/icon size/gaps/footer, and moved enlarged 26px delete icon with a 48px minimum touch target beside the active switch. Active expense outlines/tints now use red; income remains green. Meaningful today/tomorrow/overdue/paused/ended badges remain. No data or behavior changes. Analyzer clean and all 9 focused card/account-layout checks pass; light/dark narrow large-text previews inspected.
+
+Compact-card end-to-end recurring edit/pause/resume/delete check also passes (10 affected checks total); Android release build passed (63.9MB).
+
+Recurring switch sizing (2026-11-10): reduced the visible recurring-card switch to 80% while preserving its original tap area and on/off behavior.
+
+Recurring switch save isolation (2026-11-10): switch changes no longer use the screen-wide busy flag. A per-rule pending map previews only that card's requested active state and absorbs repeat interactions on it while saving; its switch retains enabled colors, and other cards/add/refresh controls remain unchanged. Failure removes the preview and restores saved state with an error. Store pause/resume/posting behavior is unchanged. A held-save regression checks unrelated controls, duplicate taps and failure rollback; all 10 focused card/layout checks pass, and the related main-widget suite passed.
+
+Switch-save isolation analyzer and Android release build pass (63.9MB).

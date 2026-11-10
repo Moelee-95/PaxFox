@@ -63,6 +63,8 @@ void main() {
     }
     await tester.tap(find.byTooltip('Add transaction'));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('create-type-expense')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('create-expense-manual')));
     await tester.pumpAndSettle();
   }

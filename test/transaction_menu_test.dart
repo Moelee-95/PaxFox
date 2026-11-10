@@ -47,8 +47,12 @@ void main() {
       final navigationPoint = tester.getCenter(find.text('Cashflow'));
       await tester.tap(find.byTooltip('Add transaction'));
       await tester.pumpAndSettle();
-      expect(find.text('Manual'), findsNWidgets(2));
-      expect(find.byKey(const ValueKey('create-expense-scan')), findsOneWidget);
+      expect(find.text('Manual'), findsNothing);
+      expect(
+        find.byKey(const ValueKey('create-type-transfer')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('create-expense-scan')), findsNothing);
       expect(
         tester.getRect(find.byTooltip('Cancel adding transaction')),
         anchor,
@@ -99,6 +103,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Add transaction'));
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('create-type-expense')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('create-expense-manual')));
       await tester.pumpAndSettle();
       expect(find.text('Save transaction'), findsOneWidget);
@@ -106,6 +112,8 @@ void main() {
       await closeTopPage(tester);
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Add transaction'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('create-type-expense')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('create-expense-scan')));
       await tester.pumpAndSettle();
@@ -150,6 +158,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Add transaction'));
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('create-type-expense')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('create-expense-upload')));
       await tester.pumpAndSettle();
       expect(find.byType(InvoiceScanScreen), findsOneWidget);
@@ -187,7 +197,9 @@ void main() {
       expect(fab.backgroundColor!.a, lessThan(1));
       await tester.tap(find.byTooltip('Add transaction'));
       await tester.pumpAndSettle();
-      expect(find.text('Gallery'), findsNWidgets(2));
+      expect(find.text('Gallery'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('create-type-income')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('create-income-gallery')));
       await tester.pumpAndSettle();
       expect(
@@ -216,6 +228,8 @@ void main() {
           .month;
       await tester.tap(find.byTooltip('Add transaction'));
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('create-type-expense')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('create-expense-manual')));
       await tester.pumpAndSettle();
       final form = tester.widget<TransactionForm>(find.byType(TransactionForm));
@@ -232,4 +246,48 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+  testWidgets(
+    'transfer is direct and Back collapses entry methods before closing',
+    (tester) async {
+      await tester.pumpWidget(MyApp(store: store));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Add transaction'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('create-type-expense')));
+      await tester.pumpAndSettle();
+      expect(find.text('Manual'), findsOneWidget);
+      expect(find.byKey(const ValueKey('create-income-manual')), findsNothing);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.text('Manual'), findsNothing);
+      expect(
+        find.byKey(const ValueKey('create-type-transfer')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('create-type-transfer')));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TransactionForm>(find.byType(TransactionForm))
+            .initialType,
+        EntryType.transfer,
+      );
+      expect(find.text('Save transaction'), findsOneWidget);
+      expect(store.entries, isEmpty);
+    },
+  );
+  testWidgets('outside tap dismisses the expanded methods too', (tester) async {
+    await tester.pumpWidget(MyApp(store: store));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Add transaction'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('create-type-income')));
+    await tester.pumpAndSettle();
+    expect(find.text('Gallery'), findsOneWidget);
+    await tester.tapAt(const Offset(5, 120));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Cancel adding transaction'), findsNothing);
+    expect(find.text('Gallery'), findsNothing);
+    expect(store.entries, isEmpty);
+  });
 }

@@ -74,7 +74,7 @@ void main() {
   }
 
   testWidgets(
-    'two-column add menu keeps eight actions accessible on small phones',
+    'progressive add menu stays compact and methods remain accessible on small phones',
     (tester) async {
       phone(tester);
       await tester.runAsync(
@@ -99,16 +99,16 @@ void main() {
       await tester.tap(find.byTooltip('Add transaction'));
       await tester.pumpAndSettle();
       await preview(tester, 'add-expense-income-light');
+      await tester.tap(find.byKey(const ValueKey('create-type-expense')));
+      await tester.pumpAndSettle();
+      await preview(tester, 'add-expense-methods-light');
+      await tester.tap(find.byTooltip('Back to transaction choices'));
+      await tester.pumpAndSettle();
       expect(
-        tester
-            .getCenter(find.byKey(const ValueKey('create-expense-manual')))
-            .dx,
-        lessThan(
-          tester
-              .getCenter(find.byKey(const ValueKey('create-income-manual')))
-              .dx,
-        ),
+        find.byKey(const ValueKey('create-type-transfer')),
+        findsOneWidget,
       );
+      expect(find.text('Manual'), findsNothing);
       tester.binding.platformDispatcher.platformBrightnessTestValue =
           Brightness.dark;
       addTearDown(
@@ -127,11 +127,16 @@ void main() {
       expect(close.hitTestable(), findsOneWidget);
       expect(tester.getBottomRight(close).dy, lessThan(740));
       for (final type in ['expense', 'income']) {
+        await tester.tap(find.byKey(ValueKey('create-type-$type')));
+        await tester.pumpAndSettle();
+        await preview(tester, 'add-$type-methods-large-text');
         for (final action in ['manual', 'scan', 'gallery', 'upload']) {
           final button = find.byKey(ValueKey('create-$type-$action'));
           await tester.ensureVisible(button);
           expect(button.hitTestable(), findsOneWidget);
         }
+        await tester.tap(find.byTooltip('Back to transaction choices'));
+        await tester.pumpAndSettle();
       }
       expect(tester.takeException(), isNull);
     },
@@ -278,7 +283,9 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Add transaction'));
       await tester.pumpAndSettle();
-      expect(find.text('File'), findsNWidgets(2));
+      expect(find.text('File'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('create-type-expense')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('create-expense-manual')));
       await tester.pumpAndSettle();
       final fieldContext = tester.element(find.byType(TextFormField).first);

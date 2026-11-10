@@ -359,6 +359,8 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.byTooltip('Add transaction'));
         await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('create-type-income')));
+        await tester.pumpAndSettle();
         await tester.tap(find.byKey(const ValueKey('create-income-manual')));
         await tester.pumpAndSettle();
         expect(find.text('Income'), findsWidgets);

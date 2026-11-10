@@ -6,7 +6,7 @@ typedef InvoiceGroupInfo = ({int id, String label});
 
 /// Groups only the currently visible results; the first matching item anchors
 /// each invoice. Individual rows stay lazy even for very large scanned batches.
-class SliverTransactionList extends StatelessWidget {
+class SliverTransactionList extends StatefulWidget {
   const SliverTransactionList({
     super.key,
     required this.entries,
@@ -20,18 +20,25 @@ class SliverTransactionList extends StatelessWidget {
   final Map<int, InvoiceGroupInfo> invoiceGroups;
 
   @override
+  State<SliverTransactionList> createState() => _SliverTransactionListState();
+}
+
+class _SliverTransactionListState extends State<SliverTransactionList> {
+  // Keep choices when snapshots refresh or an invoice temporarily leaves a filter.
+  final _collapsed = <int>{};
+  @override
   Widget build(BuildContext context) {
-    if (entries.isEmpty) {
+    if (widget.entries.isEmpty) {
       return SliverToBoxAdapter(
         child: Padding(
           padding: const EdgeInsets.all(20),
-          child: Text(emptyMessage),
+          child: Text(widget.emptyMessage),
         ),
       );
     }
     final buckets = <Object, List<LedgerEntry>>{};
-    for (final entry in entries) {
-      final group = invoiceGroups[entry.id];
+    for (final entry in widget.entries) {
+      final group = widget.invoiceGroups[entry.id];
       final Object key = group == null ? entry : ('invoice', group.id);
       (buckets[key] ??= []).add(entry);
     }
@@ -43,85 +50,212 @@ class SliverTransactionList extends StatelessWidget {
             bool first,
             bool last,
             int count,
+            String total,
           })
         >[];
     for (final bucket in buckets.values) {
-      for (var i = 0; i < bucket.length; i++) {
+      final group = widget.invoiceGroups[bucket.first.id];
+      final collapsed = group != null && _collapsed.contains(group.id);
+      final totals = <Currency, int>{};
+      if (group != null) {
+        for (final entry in bucket) {
+          final amount = entry.type == EntryType.refund
+              ? -entry.amount
+              : entry.amount;
+          totals.update(
+            entry.currency,
+            (value) => value + amount,
+            ifAbsent: () => amount,
+          );
+        }
+      }
+      final total = totals.entries
+          .map((entry) => entry.key.display(entry.value))
+          .join(' / ');
+      for (var i = 0; i < (collapsed ? 1 : bucket.length); i++) {
         rows.add((
           entry: bucket[i],
-          group: invoiceGroups[bucket[i].id],
+          group: widget.invoiceGroups[bucket[i].id],
           first: i == 0,
-          last: i == bucket.length - 1,
+          last: collapsed || i == bucket.length - 1,
           count: bucket.length,
+          total: total,
         ));
       }
     }
+    final keys = [
+      for (final row in rows)
+        ValueKey<Object>(
+          row.group != null && row.first
+              ? ('invoice', row.group!.id)
+              : ('entry', row.entry.id ?? row.entry),
+        ),
+    ];
+    final indices = {for (var i = 0; i < keys.length; i++) keys[i]: i};
     return SliverList.builder(
       itemCount: rows.length,
+      findChildIndexCallback: (key) => indices[key],
       itemBuilder: (context, index) {
         final row = rows[index];
-        final tile = tileBuilder(row.entry);
-        if (row.group == null) return tile;
+        if (row.group == null) {
+          return KeyedSubtree(
+            key: keys[index],
+            child: widget.tileBuilder(row.entry),
+          );
+        }
+        final collapsed = _collapsed.contains(row.group!.id);
         final colors = Theme.of(context).colorScheme;
         final outline = colors.primary.withValues(alpha: .3);
-        return Padding(
-          padding: EdgeInsets.only(
-            top: row.first ? 8 : 0,
-            bottom: row.last ? 8 : 0,
-          ),
-          child: CustomPaint(
-            foregroundPainter: _InvoiceOutline(
-              color: outline,
-              first: row.first,
-              last: row.last,
+        return KeyedSubtree(
+          key: keys[index],
+          child: Padding(
+            padding: EdgeInsets.only(
+              top: row.first ? 8 : 0,
+              bottom: row.last ? 8 : 0,
             ),
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                5,
-                row.first ? 4 : 0,
-                5,
-                row.last ? 5 : 0,
+            child: CustomPaint(
+              foregroundPainter: _InvoiceOutline(
+                color: outline,
+                first: row.first,
+                last: row.last,
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (row.first)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(7, 8, 7, 10),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.receipt_long_outlined,
-                            size: 17,
-                            color: colors.primary,
-                          ),
-                          const SizedBox(width: 7),
-                          Expanded(
-                            child: Text(
-                              row.group!.label,
-                              style: Theme.of(context).textTheme.labelMedium
-                                  ?.copyWith(
-                                    color: colors.primary,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            '${row.count} ${row.count == 1 ? 'item' : 'items'}',
-                            style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(color: colors.onSurfaceVariant),
-                          ),
-                        ],
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  5,
+                  row.first ? 4 : 0,
+                  5,
+                  row.last ? 5 : 0,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (row.first)
+                      _InvoiceHeader(
+                        group: row.group!,
+                        count: row.count,
+                        total: row.total,
+                        collapsed: collapsed,
+                        onToggle: () => setState(() {
+                          if (!_collapsed.add(row.group!.id)) {
+                            _collapsed.remove(row.group!.id);
+                          }
+                        }),
                       ),
-                    ),
-                  tile,
-                ],
+                    if (!collapsed) widget.tileBuilder(row.entry),
+                  ],
+                ),
               ),
             ),
           ),
         );
       },
+    );
+  }
+}
+
+class _InvoiceHeader extends StatelessWidget {
+  const _InvoiceHeader({
+    required this.group,
+    required this.count,
+    required this.total,
+    required this.collapsed,
+    required this.onToggle,
+  });
+  final InvoiceGroupInfo group;
+  final int count;
+  final String total;
+  final bool collapsed;
+  final VoidCallback onToggle;
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final title = Text(
+      group.label,
+      style: theme.textTheme.labelMedium?.copyWith(
+        color: colors.primary,
+        fontWeight: FontWeight.w700,
+      ),
+    );
+    final countLabel = Text(
+      '$count ${count == 1 ? 'item' : 'items'}',
+      style: theme.textTheme.labelSmall?.copyWith(
+        color: colors.onSurfaceVariant,
+      ),
+    );
+    final totalLabel = Text(
+      'Total $total',
+      style: theme.textTheme.labelMedium?.copyWith(
+        color: colors.primary,
+        fontWeight: FontWeight.w700,
+      ),
+    );
+    final chevron = AnimatedRotation(
+      turns: collapsed ? -.25 : 0,
+      duration: Duration(
+        milliseconds: MediaQuery.disableAnimationsOf(context) ? 0 : 150,
+      ),
+      child: Icon(Icons.expand_more_rounded, size: 20, color: colors.primary),
+    );
+    return Semantics(
+      button: true,
+      expanded: !collapsed,
+      child: InkWell(
+        key: ValueKey('invoice-header-${group.id}'),
+        onTap: onToggle,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(7, 8, 7, 10),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final compact =
+                  constraints.maxWidth < 340 ||
+                  MediaQuery.textScalerOf(context).scale(14) > 18;
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.receipt_long_outlined,
+                        size: 17,
+                        color: colors.primary,
+                      ),
+                      const SizedBox(width: 7),
+                      Expanded(child: title),
+                      if (!compact) ...[
+                        const SizedBox(width: 6),
+                        ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: constraints.maxWidth * .45,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [countLabel, totalLabel],
+                          ),
+                        ),
+                      ],
+                      const SizedBox(width: 4),
+                      chevron,
+                    ],
+                  ),
+                  if (compact)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 24, top: 4),
+                      child: Wrap(
+                        spacing: 12,
+                        runSpacing: 2,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [countLabel, totalLabel],
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
     );
   }
 }

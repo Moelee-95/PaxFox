@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moneva/core/data/ledger_store.dart';
@@ -7,6 +9,22 @@ import 'package:moneva/core/presentation/debt_editor.dart';
 import 'package:moneva/screens/accounts_screen.dart';
 import 'package:moneva/screens/recurring_screen.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+class _DelayedToggleStore extends LedgerStore {
+  _DelayedToggleStore(super.db);
+  final gate = Completer<void>();
+  int toggles = 0;
+  @override
+  Future<void> setRecurringActive(
+    int id,
+    bool active, {
+    DateTime? today,
+  }) async {
+    toggles++;
+    await gate.future;
+    await super.setRecurringActive(id, active, today: today);
+  }
+}
 
 void main() {
   late LedgerStore store;
@@ -209,7 +227,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
   testWidgets(
-    'recurring icon actions show orange paused and blue active schedules',
+    'recurring cards use a switch to pause and resume without opening the editor',
     (tester) async {
       final today = dateOnly(DateTime.now());
       await tester.runAsync(
@@ -226,10 +244,7 @@ void main() {
       );
       await tester.pumpWidget(MaterialApp(home: RecurringScreen(store: store)));
       await tester.pumpAndSettle();
-      expect(
-        tester.widget<Text>(find.textContaining('Next:')).style!.color,
-        Colors.blue,
-      );
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
       expect(find.text('Pause'), findsNothing);
       expect(find.byTooltip('Delete recurring rule'), findsOneWidget);
       await tester.runAsync(() async {
@@ -237,22 +252,91 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 100));
       });
       await tester.pumpAndSettle();
-      expect(
-        tester
-            .widget<Text>(find.textContaining('Paused; scheduled:'))
-            .style!
-            .color,
-        Colors.orange,
-      );
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+      expect(find.textContaining('Paused'), findsOneWidget);
+      expect(find.byType(RecurringForm), findsNothing);
       await tester.runAsync(() async {
         await tester.tap(find.byTooltip('Resume'));
         await Future<void>.delayed(const Duration(milliseconds: 100));
       });
       await tester.pumpAndSettle();
-      expect(
-        tester.widget<Text>(find.textContaining('Next:')).style!.color,
-        Colors.blue,
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'saving a switch keeps other controls visible and enabled, blocks repeat taps and rolls back on failure',
+    (tester) async {
+      final today = dateOnly(DateTime.now());
+      await tester.runAsync(() async {
+        for (final name in ['First rent', 'Second rent']) {
+          await store.saveRecurring(
+            RecurringRule(
+              description: name,
+              amount: 100,
+              category: 'Other',
+              accountId: getBank().id!,
+              day: today.day,
+              nextDate: DateTime(today.year + 1, today.month, today.day),
+            ),
+          );
+        }
+      });
+      final delayed = _DelayedToggleStore(store.db);
+      addTearDown(delayed.dispose);
+      await tester.runAsync(delayed.refresh);
+      await tester.pumpWidget(
+        MaterialApp(home: RecurringScreen(store: delayed)),
       );
+      await tester.pumpAndSettle();
+      final first = find.byKey(
+        ValueKey('recurring-active-${delayed.recurringRules.first.id}'),
+      );
+      await tester.tap(first);
+      await tester.pumpAndSettle();
+      expect(tester.widget<Switch>(first).value, isFalse);
+      expect(
+        tester.widget<Switch>(find.byType(Switch).last).onChanged,
+        isNotNull,
+      );
+      expect(tester.widget<Switch>(first).onChanged, isNotNull);
+      expect(
+        tester
+            .widget<FloatingActionButton>(find.byType(FloatingActionButton))
+            .onPressed,
+        isNotNull,
+      );
+      expect(
+        tester
+            .widget<IconButton>(
+              find.byWidgetPredicate(
+                (w) => w is IconButton && w.tooltip == 'Check due payments',
+              ),
+            )
+            .onPressed,
+        isNotNull,
+      );
+      expect(
+        tester
+            .widget<IconButton>(
+              find
+                  .byWidgetPredicate(
+                    (w) =>
+                        w is IconButton && w.tooltip == 'Delete recurring rule',
+                  )
+                  .last,
+            )
+            .onPressed,
+        isNotNull,
+      );
+      // This repeat tap is intentionally blocked by the saving card.
+      await tester.tap(first, warnIfMissed: false);
+      await tester.pump();
+      expect(delayed.toggles, 1);
+      delayed.gate.completeError(ArgumentError('Could not save this payment.'));
+      await tester.pumpAndSettle();
+      expect(tester.widget<Switch>(first).value, isTrue);
+      expect(find.text('Could not save this payment.'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
